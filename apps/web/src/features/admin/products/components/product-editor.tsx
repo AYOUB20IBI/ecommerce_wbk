@@ -1,0 +1,904 @@
+
+"use client";
+
+import {
+  useEffect,
+  useState,
+  type FormEvent,
+} from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import {
+  ArrowLeft,
+  Check,
+  Eye,
+  EyeOff,
+  LoaderCircle,
+  Package,
+  Save,
+  Sparkles,
+} from "lucide-react";
+
+type ProductType = "simple" | "variable";
+type Status = "draft" | "published" | "private" | "archived";
+
+type Variant = {
+  id?: string;
+  sku: string | null;
+  ean: string | null;
+  regularPrice: string | null;
+  salePrice: string | null;
+  stockQuantity: number;
+  manageStock: boolean;
+  isActive: boolean;
+};
+
+type ProductDetail = {
+  id: string;
+  type: ProductType;
+  name: string;
+  slug: string;
+  status: Status;
+  description: string | null;
+  shortDescription: string | null;
+  seoTitle: string | null;
+  seoDescription: string | null;
+  isFeatured: boolean;
+  variants: Variant[];
+};
+
+type ApiResult<T> = {
+  success: boolean;
+  message?: string;
+  data?: T;
+  errors?: unknown;
+};
+
+type ProductForm = {
+  name: string;
+  slug: string;
+  type: ProductType;
+  status: Status;
+  description: string;
+  shortDescription: string;
+  seoTitle: string;
+  seoDescription: string;
+  isFeatured: boolean;
+  sku: string;
+  ean: string;
+  regularPrice: string;
+  salePrice: string;
+  stockQuantity: string;
+  manageStock: boolean;
+  isActive: boolean;
+};
+
+const INITIAL: ProductForm = {
+  name: "",
+  slug: "",
+  type: "simple",
+  status: "draft",
+  description: "",
+  shortDescription: "",
+  seoTitle: "",
+  seoDescription: "",
+  isFeatured: false,
+  sku: "",
+  ean: "",
+  regularPrice: "",
+  salePrice: "",
+  stockQuantity: "0",
+  manageStock: true,
+  isActive: true,
+};
+
+const fieldClass =
+  "mt-2 h-11 w-full rounded-xl border border-[#E5E9F2] bg-white px-3 text-sm text-[#172444] outline-none transition focus:border-[#6D5DF6]";
+
+const textAreaClass =
+  "mt-2 w-full rounded-xl border border-[#E5E9F2] bg-white px-3 py-3 text-sm text-[#172444] outline-none transition focus:border-[#6D5DF6]";
+
+function slugify(text: string) {
+  return text
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+async function api<T>(
+  url: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const response = await fetch(url, {
+    ...options,
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+      ...(options.body !== undefined
+        ? { "Content-Type": "application/json" }
+        : {}),
+    },
+  });
+
+  let result: ApiResult<T>;
+
+  try {
+    result = (await response.json()) as ApiResult<T>;
+  } catch {
+    throw new Error("Invalid API response.");
+  }
+
+  if (response.status === 401) {
+    window.location.replace("/admin/login");
+    throw new Error("Session expired.");
+  }
+
+  if (!response.ok || result.success !== true) {
+    const details =
+      result.errors !== undefined
+        ? ` ${JSON.stringify(result.errors).slice(0, 1200)}`
+        : "";
+
+    throw new Error(
+      (result.message || `HTTP ${response.status}`) + details,
+    );
+  }
+
+  if (result.data === undefined) {
+    throw new Error("API returned no data.");
+  }
+
+  return result.data;
+}
+
+function optionalText(value: string): string | null {
+  return value.trim() || null;
+}
+
+function optionalPrice(value: string): string | null {
+  return value.trim() || null;
+}
+
+function validPrice(value: string): boolean {
+  return /^(0|[1-9]\d{0,9})(\.\d{1,2})?$/.test(value);
+}
+
+function moneyCents(value: string): bigint {
+  const [whole, decimal = ""] = value.split(".");
+
+  return BigInt(whole) * BigInt(100) +
+    BigInt(decimal.padEnd(2, "0"));
+}
+
+const VARIABLE_TEMPLATE = JSON.stringify(
+  {
+    attributes: [
+      {
+        attributeId: "REPLACE_WITH_ATTRIBUTE_UUID",
+        valueIds: ["REPLACE_WITH_VALUE_UUID"],
+        visible: true,
+        usedForVariations: true,
+      },
+    ],
+    variants: [
+      {
+        sku: null,
+        ean: null,
+        regularPrice: "199.00",
+        salePrice: null,
+        stockQuantity: 10,
+        manageStock: true,
+        isActive: true,
+        isDefault: true,
+        options: [
+          {
+            attributeId: "REPLACE_WITH_ATTRIBUTE_UUID",
+            valueId: "REPLACE_WITH_VALUE_UUID",
+          },
+        ],
+      },
+    ],
+  },
+  null,
+  2,
+);
+
+export function ProductEditor({
+  productId,
+  canCreate,
+  canUpdate,
+}: {
+  productId?: string;
+  canCreate: boolean;
+  canUpdate: boolean;
+}) {
+  const router = useRouter();
+  const editing = Boolean(productId);
+
+  const [form, setForm] = useState<ProductForm>(INITIAL);
+  const [product, setProduct] = useState<ProductDetail | null>(null);
+  const [variableConfig, setVariableConfig] =
+    useState(VARIABLE_TEMPLATE);
+
+  const [loading, setLoading] = useState(editing);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [slugTouched, setSlugTouched] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  useEffect(() => {
+    if (!productId) return;
+
+    const controller = new AbortController();
+    let active = true;
+
+    api<ProductDetail>(
+      `/api/admin/products/${productId}`,
+      { signal: controller.signal },
+    )
+      .then((item) => {
+        if (!active) return;
+
+        setProduct(item);
+
+        const firstVariant = item.variants?.[0];
+
+        setForm({
+          name: item.name,
+          slug: item.slug,
+          type: item.type,
+          status: item.status,
+          description: item.description ?? "",
+          shortDescription: item.shortDescription ?? "",
+          seoTitle: item.seoTitle ?? "",
+          seoDescription: item.seoDescription ?? "",
+          isFeatured: Boolean(item.isFeatured),
+          sku: firstVariant?.sku ?? "",
+          ean: firstVariant?.ean ?? "",
+          regularPrice: firstVariant?.regularPrice ?? "",
+          salePrice: firstVariant?.salePrice ?? "",
+          stockQuantity: String(
+            firstVariant?.stockQuantity ?? 0,
+          ),
+          manageStock: firstVariant?.manageStock ?? true,
+          isActive: firstVariant?.isActive ?? true,
+        });
+
+        setSlugTouched(true);
+      })
+      .catch((caught) => {
+        if (!active) return;
+
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "Unable to load product.",
+        );
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [productId]);
+
+  function update<K extends keyof ProductForm>(
+    key: K,
+    value: ProductForm[K],
+  ) {
+    setForm((previous) => ({
+      ...previous,
+      [key]: value,
+    }));
+  }
+
+  function changeName(name: string) {
+    setForm((previous) => ({
+      ...previous,
+      name,
+      slug: slugTouched ? previous.slug : slugify(name),
+    }));
+  }
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (saving || loading) return;
+
+    if (editing && !canUpdate) {
+      setError("You need products.update permission.");
+      return;
+    }
+
+    if (!editing && !canCreate) {
+      setError("You need products.create permission.");
+      return;
+    }
+
+    setError("");
+
+    if (!form.name.trim() || !form.slug.trim()) {
+      setError("Product name and slug are required.");
+      return;
+    }
+
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(form.slug)) {
+      setError("Slug must contain lowercase letters, numbers and hyphens.");
+      return;
+    }
+
+    const common = {
+      name: form.name.trim(),
+      slug: form.slug.trim(),
+      status: form.status,
+      description: optionalText(form.description),
+      shortDescription: optionalText(form.shortDescription),
+      seoTitle: optionalText(form.seoTitle),
+      seoDescription: optionalText(form.seoDescription),
+      isFeatured: form.isFeatured,
+    };
+
+    setSaving(true);
+
+    try {
+      if (editing && productId) {
+        if (product?.type === "variable") {
+          await api(
+            `/api/admin/products/${productId}?action=variable`,
+            {
+              method: "PATCH",
+              body: JSON.stringify(common),
+            },
+          );
+        } else {
+          const variant = buildVariant();
+
+          await api(
+            `/api/admin/products/${productId}`,
+            {
+              method: "PATCH",
+              body: JSON.stringify({
+                ...common,
+                variant,
+              }),
+            },
+          );
+        }
+      } else if (form.type === "simple") {
+        const variant = buildVariant();
+
+        await api("/api/admin/products", {
+          method: "POST",
+          body: JSON.stringify({
+            ...common,
+            type: "simple",
+            variant,
+          }),
+        });
+      } else {
+        let variable: unknown;
+
+        try {
+          variable = JSON.parse(variableConfig);
+        } catch {
+          throw new Error(
+            "Invalid JSON for attributes and variants.",
+          );
+        }
+
+        if (
+          !variable ||
+          typeof variable !== "object" ||
+          Array.isArray(variable) ||
+          !("attributes" in variable) ||
+          !("variants" in variable) ||
+          !Array.isArray(variable.attributes) ||
+          !Array.isArray(variable.variants)
+        ) {
+          throw new Error(
+            "Variable configuration requires attributes and variants arrays.",
+          );
+        }
+
+        await api("/api/admin/products", {
+          method: "POST",
+          body: JSON.stringify({
+            ...common,
+            type: "variable",
+            attributes: variable.attributes,
+            variants: variable.variants,
+          }),
+        });
+      }
+
+      router.push("/admin/products");
+      router.refresh();
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Unable to save product.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function buildVariant() {
+    const regular = optionalPrice(form.regularPrice);
+    const sale = optionalPrice(form.salePrice);
+    const stock = Number(form.stockQuantity);
+
+    if (regular !== null && !validPrice(regular)) {
+      throw new Error("Invalid regular price.");
+    }
+
+    if (sale !== null && !validPrice(sale)) {
+      throw new Error("Invalid sale price.");
+    }
+
+    if (
+      sale !== null &&
+      (regular === null ||
+        moneyCents(sale) > moneyCents(regular))
+    ) {
+      throw new Error(
+        "Sale price cannot exceed regular price.",
+      );
+    }
+
+    if (
+      !Number.isSafeInteger(stock) ||
+      stock < 0 ||
+      stock > 2147483647
+    ) {
+      throw new Error("Invalid stock quantity.");
+    }
+
+    if (
+      form.status === "published" &&
+      (regular === null || !form.isActive)
+    ) {
+      throw new Error(
+        "Published simple products require an active variant with a price.",
+      );
+    }
+
+    return {
+      sku: optionalText(form.sku),
+      ean: optionalText(form.ean),
+      regularPrice: regular,
+      salePrice: sale,
+      stockQuantity: stock,
+      manageStock: form.manageStock,
+      isActive: form.isActive,
+    };
+  }
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <LoaderCircle className="size-8 animate-spin text-[#6D5DF6]" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-[1250px] space-y-6 pb-10">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <Link
+            href="/admin/products"
+            className="inline-flex items-center gap-2 text-xs font-semibold text-[#6D5DF6]"
+          >
+            <ArrowLeft className="size-4" />
+            Back to Products
+          </Link>
+
+          <p className="mt-4 text-xs font-semibold uppercase tracking-widest text-[#8794AC]">
+            Catalog Management
+          </p>
+
+          <h1 className="mt-1 text-2xl font-bold text-[#172444]">
+            {editing ? "Edit Product" : "Create Product"}
+          </h1>
+
+          <p className="mt-1 text-sm text-[#8290AC]">
+            Manage product information, pricing and inventory.
+          </p>
+        </div>
+
+        <span className="rounded-xl bg-[#EFECFF] px-4 py-2 text-xs font-bold capitalize text-[#6D5DF6]">
+          {form.status}
+        </span>
+      </div>
+
+      {error && (
+        <div
+          role="alert"
+          className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+        >
+          {error}
+        </div>
+      )}
+
+      <form onSubmit={(event) => void save(event)}>
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_310px]">
+          <div className="space-y-6">
+            <section className="rounded-2xl border border-[#E9EDF6] bg-white p-5 sm:p-6">
+              <h2 className="flex items-center gap-2 text-sm font-bold text-[#172444]">
+                <Package className="size-4 text-[#6D5DF6]" />
+                General Information
+              </h2>
+
+              <div className="mt-5 space-y-4">
+                {!editing && (
+                  <label className="block text-xs font-semibold text-[#465575]">
+                    Product Type
+                    <select
+                      value={form.type}
+                      onChange={(event) =>
+                        update(
+                          "type",
+                          event.target.value as ProductType,
+                        )
+                      }
+                      className={fieldClass}
+                    >
+                      <option value="simple">Simple Product</option>
+                      <option value="variable">Variable Product</option>
+                    </select>
+                  </label>
+                )}
+
+                <label className="block text-xs font-semibold text-[#465575]">
+                  Product Name *
+                  <input
+                    required
+                    maxLength={255}
+                    value={form.name}
+                    onChange={(event) =>
+                      changeName(event.target.value)
+                    }
+                    className={fieldClass}
+                    placeholder="Product name"
+                  />
+                </label>
+
+                <label className="block text-xs font-semibold text-[#465575]">
+                  Slug *
+                  <input
+                    required
+                    maxLength={255}
+                    value={form.slug}
+                    onChange={(event) => {
+                      setSlugTouched(true);
+                      update(
+                        "slug",
+                        slugify(event.target.value),
+                      );
+                    }}
+                    className={fieldClass}
+                    placeholder="product-name"
+                  />
+                </label>
+
+                <label className="block text-xs font-semibold text-[#465575]">
+                  Short Description
+                  <textarea
+                    maxLength={5000}
+                    rows={3}
+                    value={form.shortDescription}
+                    onChange={(event) =>
+                      update(
+                        "shortDescription",
+                        event.target.value,
+                      )
+                    }
+                    className={textAreaClass}
+                  />
+                </label>
+
+                <label className="block text-xs font-semibold text-[#465575]">
+                  Full Description
+                  <textarea
+                    maxLength={100000}
+                    rows={8}
+                    value={form.description}
+                    onChange={(event) =>
+                      update(
+                        "description",
+                        event.target.value,
+                      )
+                    }
+                    className={textAreaClass}
+                  />
+                </label>
+              </div>
+            </section>
+
+            {(form.type === "simple") && (
+              <section className="rounded-2xl border border-[#E9EDF6] bg-white p-5 sm:p-6">
+                <h2 className="text-sm font-bold text-[#172444]">
+                  Pricing & Inventory
+                </h2>
+
+                <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                  {(
+                    [
+                      ["regularPrice", "Regular Price"],
+                      ["salePrice", "Sale Price"],
+                      ["sku", "SKU (optional)"],
+                      ["ean", "EAN (optional)"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <label
+                      key={key}
+                      className="block text-xs font-semibold text-[#465575]"
+                    >
+                      {label}
+                      <input
+                        type="text"
+                        maxLength={
+                          key === "ean"
+                            ? 32
+                            : key === "sku"
+                              ? 100
+                              : undefined
+                        }
+                        value={form[key]}
+                        onChange={(event) =>
+                          update(key, event.target.value)
+                        }
+                        placeholder={
+                          key.includes("Price")
+                            ? "99.00"
+                            : ""
+                        }
+                        className={fieldClass}
+                      />
+                    </label>
+                  ))}
+
+                  <label className="block text-xs font-semibold text-[#465575]">
+                    Stock Quantity
+                    <input
+                      required
+                      type="number"
+                      min={0}
+                      max={2147483647}
+                      step={1}
+                      value={form.stockQuantity}
+                      onChange={(event) =>
+                        update(
+                          "stockQuantity",
+                          event.target.value,
+                        )
+                      }
+                      className={fieldClass}
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-5 flex flex-wrap gap-5">
+                  <label className="flex items-center gap-2 text-xs font-semibold text-[#465575]">
+                    <input
+                      type="checkbox"
+                      checked={form.manageStock}
+                      onChange={(event) =>
+                        update(
+                          "manageStock",
+                          event.target.checked,
+                        )
+                      }
+                      className="accent-[#6D5DF6]"
+                    />
+                    Manage Stock
+                  </label>
+
+                  <label className="flex items-center gap-2 text-xs font-semibold text-[#465575]">
+                    <input
+                      type="checkbox"
+                      checked={form.isActive}
+                      onChange={(event) =>
+                        update(
+                          "isActive",
+                          event.target.checked,
+                        )
+                      }
+                      className="accent-[#6D5DF6]"
+                    />
+                    Active Variant
+                  </label>
+                </div>
+              </section>
+            )}
+
+            {!editing && form.type === "variable" && (
+              <section className="rounded-2xl border border-[#E9EDF6] bg-white p-5 sm:p-6">
+                <h2 className="text-sm font-bold text-[#172444]">
+                  Variable Product Configuration
+                </h2>
+
+                <p className="mt-2 text-xs leading-6 text-[#8290AC]">
+                  This advanced configuration uses the existing
+                  attributes and values UUIDs in your database.
+                  The visual attribute and variant builder will
+                  follow in AD.4.4.
+                </p>
+
+                <textarea
+                  aria-label="Variable attributes and variants JSON"
+                  rows={18}
+                  spellCheck={false}
+                  value={variableConfig}
+                  onChange={(event) =>
+                    setVariableConfig(event.target.value)
+                  }
+                  className={`${textAreaClass} font-mono text-xs`}
+                />
+              </section>
+            )}
+
+            {editing && form.type === "variable" && (
+              <section className="rounded-2xl border border-[#E9EDF6] bg-white p-5 sm:p-6">
+                <h2 className="text-sm font-bold text-[#172444]">
+                  Variants
+                </h2>
+
+                <p className="mt-2 text-xs text-[#8290AC]">
+                  This page edits the variable product&apos;s general
+                  information. Editing individual variants,
+                  attributes and their order will be handled
+                  separately in AD.4.4.
+                </p>
+
+                <p className="mt-3 text-xs font-semibold text-[#6554D8]">
+                  {product?.variants?.length ?? 0} variants
+                </p>
+              </section>
+            )}
+
+            <section className="rounded-2xl border border-[#E9EDF6] bg-white p-5 sm:p-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-bold text-[#172444]">
+                  SEO Settings
+                </h2>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowAdvanced((value) => !value)
+                  }
+                  className="flex items-center gap-2 text-xs font-semibold text-[#6D5DF6]"
+                >
+                  {showAdvanced ? (
+                    <EyeOff className="size-4" />
+                  ) : (
+                    <Eye className="size-4" />
+                  )}
+                  {showAdvanced ? "Hide" : "Show"}
+                </button>
+              </div>
+
+              {showAdvanced && (
+                <div className="mt-5 space-y-4">
+                  <label className="block text-xs font-semibold text-[#465575]">
+                    SEO Title
+                    <input
+                      maxLength={255}
+                      value={form.seoTitle}
+                      onChange={(event) =>
+                        update(
+                          "seoTitle",
+                          event.target.value,
+                        )
+                      }
+                      className={fieldClass}
+                    />
+                  </label>
+
+                  <label className="block text-xs font-semibold text-[#465575]">
+                    SEO Description
+                    <textarea
+                      maxLength={2000}
+                      rows={4}
+                      value={form.seoDescription}
+                      onChange={(event) =>
+                        update(
+                          "seoDescription",
+                          event.target.value,
+                        )
+                      }
+                      className={textAreaClass}
+                    />
+                  </label>
+                </div>
+              )}
+            </section>
+          </div>
+
+          <aside className="space-y-5">
+            <section className="rounded-2xl border border-[#E9EDF6] bg-white p-5">
+              <h2 className="text-sm font-bold text-[#172444]">
+                Publishing
+              </h2>
+
+              <label className="mt-5 block text-xs font-semibold text-[#465575]">
+                Product Status
+                <select
+                  value={form.status}
+                  onChange={(event) =>
+                    update(
+                      "status",
+                      event.target.value as Status,
+                    )
+                  }
+                  className={fieldClass}
+                >
+                  <option value="draft">Draft</option>
+                  <option value="published">Published</option>
+                  <option value="private">Private</option>
+                  <option value="archived">Archived</option>
+                </select>
+              </label>
+
+              <label className="mt-5 flex items-center gap-3 rounded-xl bg-[#F8F7FF] p-3 text-xs font-semibold text-[#465575]">
+                <input
+                  type="checkbox"
+                  checked={form.isFeatured}
+                  onChange={(event) =>
+                    update(
+                      "isFeatured",
+                      event.target.checked,
+                    )
+                  }
+                  className="accent-[#6D5DF6]"
+                />
+                <Sparkles className="size-4 text-[#6D5DF6]" />
+                Featured Product
+              </label>
+
+              <button
+                type="submit"
+                disabled={
+                  saving ||
+                  (editing ? !canUpdate : !canCreate)
+                }
+                className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#6D5DF6] px-4 text-xs font-bold text-white hover:bg-[#5847E4] disabled:opacity-50"
+              >
+                {saving ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : editing ? (
+                  <Save className="size-4" />
+                ) : (
+                  <Check className="size-4" />
+                )}
+
+                {saving
+                  ? "Saving..."
+                  : editing
+                    ? "Update Product"
+                    : "Create Product"}
+              </button>
+
+              <Link
+                href="/admin/products"
+                className="mt-3 block rounded-xl border border-[#E5E9F2] px-4 py-3 text-center text-xs font-semibold text-[#65738E]"
+              >
+                Cancel
+              </Link>
+            </section>
+          </aside>
+        </div>
+      </form>
+    </div>
+  );
+}

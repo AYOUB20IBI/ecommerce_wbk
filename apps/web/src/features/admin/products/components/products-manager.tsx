@@ -1,0 +1,1051 @@
+
+"use client";
+
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import Link from "next/link";
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronLeft,
+  ChevronRight,
+  ImageOff,
+  LoaderCircle,
+  Package,
+  Pencil,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  SlidersHorizontal,
+  Star,
+  Trash2,
+  X,
+} from "lucide-react";
+
+type Product = {
+  id: string;
+  name: string;
+  slug: string;
+  sku: string | null;
+  type: "simple" | "variable";
+  status: string;
+  regularPrice: string | null;
+  minPrice: string | null;
+  maxPrice: string | null;
+  stockQuantity: number | null;
+  totalStock: number;
+  variantsCount: number;
+  isFeatured: boolean;
+  isDeleted: boolean;
+  createdAt: string;
+  updatedAt: string;
+  brand: {
+    id: string;
+    name: string;
+    slug: string;
+  } | null;
+  featuredImage: {
+    id: string;
+    externalUrl: string | null;
+    sourceType: string | null;
+    storageKey: string | null;
+    altText: string | null;
+  } | null;
+  categories?: Array<{ id: string; name: string }>;
+  tags?: Array<{ id: string; name: string }>;
+};
+
+type ProductList = {
+  items: Product[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+};
+
+type ApiResponse<T> = {
+  success: boolean;
+  data?: T;
+  message?: string;
+};
+
+type Props = {
+  canCreate: boolean;
+  canUpdate: boolean;
+  canDelete: boolean;
+  canPurge: boolean;
+};
+
+type View = "all" | "published" | "draft" | "private" | "trash";
+type SortBy = "createdAt" | "updatedAt" | "name" | "price";
+type SortOrder = "asc" | "desc";
+
+const PAGE_SIZE = 20;
+
+const selectClass =
+  "h-10 rounded-lg border border-[#E4E8F1] bg-white px-3 text-xs text-[#344362] outline-none focus:border-[#6D5DF6]";
+
+const mediaBase = (
+  process.env.NEXT_PUBLIC_MEDIA_PUBLIC_URL ?? ""
+).replace(/\/+$/, "");
+
+function imageUrl(product: Product): string | null {
+  const image = product.featuredImage;
+  if (!image) return null;
+
+  const raw =
+    image.externalUrl ||
+    (image.storageKey && mediaBase
+      ? `${mediaBase}/${image.storageKey
+          .split("/")
+          .map(encodeURIComponent)
+          .join("/")}`
+      : null);
+
+  if (!raw) return null;
+
+  try {
+    const url = new URL(raw);
+
+    return url.protocol === "https:" ||
+      url.protocol === "http:"
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function ProductImage({
+  product,
+  size = "md",
+}: {
+  product: Product;
+  size?: "md" | "lg";
+}) {
+  const [failed, setFailed] = useState(false);
+  const url = imageUrl(product);
+
+  const dimensions =
+    size === "lg" ? "size-[76px]" : "size-14";
+
+  return (
+    <div
+      className={`flex ${dimensions} shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[#E9ECF4] bg-[#F7F8FC]`}
+    >
+      {url && !failed ? (
+        // Remote merchant images can be from multiple domains.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={url}
+          alt={
+            product.featuredImage?.altText ||
+            product.name
+          }
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          onError={() => setFailed(true)}
+          className="size-full object-contain"
+        />
+      ) : (
+        <ImageOff className="size-5 text-[#A5B0C4]" />
+      )}
+    </div>
+  );
+}
+
+function formatPrice(value: string | null) {
+  if (!value) return "—";
+
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "—";
+
+  return amount.toLocaleString("fr-MA", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function Price({ product }: { product: Product }) {
+  const min = product.minPrice;
+  const max = product.maxPrice;
+
+  if (!min) {
+    return (
+      <span className="text-xs text-[#9AA5BA]">—</span>
+    );
+  }
+
+  const hasRange =
+    max !== null && Number(max) !== Number(min);
+
+  const sale =
+    product.type === "simple" &&
+    product.regularPrice !== null &&
+    Number(product.regularPrice) > Number(min);
+
+  return (
+    <div className="text-xs">
+      {sale && (
+        <span className="mr-2 text-[#98A2B5] line-through">
+          {formatPrice(product.regularPrice)}
+        </span>
+      )}
+      <span className="font-semibold text-[#273956]">
+        {formatPrice(min)}
+        {hasRange && ` – ${formatPrice(max)}`}
+      </span>
+    </div>
+  );
+}
+
+function Stock({ product }: { product: Product }) {
+  const count = product.totalStock;
+
+  return (
+    <div className="text-xs">
+      {count > 0 ? (
+        <span className="font-bold text-emerald-700">
+          In stock
+        </span>
+      ) : (
+        <span className="font-bold text-amber-700">
+          0 tracked
+        </span>
+      )}
+      <span className="ml-1 text-[#7786A2]">
+        ({count})
+      </span>
+    </div>
+  );
+}
+
+function Status({ product }: { product: Product }) {
+  const name = product.isDeleted
+    ? "Trashed"
+    : product.status;
+
+  const className = product.isDeleted
+    ? "bg-red-50 text-red-700"
+    : product.status === "published"
+      ? "bg-emerald-50 text-emerald-700"
+      : product.status === "draft"
+        ? "bg-amber-50 text-amber-700"
+        : "bg-[#F0EDFF] text-[#6554D8]";
+
+  return (
+    <span
+      className={`inline-flex rounded-md px-2 py-1 text-[11px] font-semibold capitalize ${className}`}
+    >
+      {name}
+    </span>
+  );
+}
+
+async function api<T>(
+  url: string,
+  signal?: AbortSignal,
+  method: "GET" | "POST" | "DELETE" = "GET",
+): Promise<T> {
+  const response = await fetch(url, {
+    method,
+    credentials: "same-origin",
+    cache: "no-store",
+    signal,
+    headers: { Accept: "application/json" },
+  });
+
+  const result =
+    (await response.json()) as ApiResponse<T>;
+
+  if (response.status === 401) {
+    window.location.replace("/admin/login");
+    throw new Error("Session expired.");
+  }
+
+  if (!response.ok || !result.success) {
+    throw new Error(
+      result.message ||
+        `Request failed (${response.status}).`,
+    );
+  }
+
+  return result.data as T;
+}
+
+function Taxonomy({
+  values,
+}: {
+  values?: Array<{ id: string; name: string }>;
+}) {
+  if (!values) {
+    return (
+      <span
+        title="Taxonomy data is not included in the current list API"
+        className="text-xs text-[#A1AABC]"
+      >
+        —
+      </span>
+    );
+  }
+
+  if (!values.length) {
+    return <span className="text-xs text-[#A1AABC]">—</span>;
+  }
+
+  return (
+    <div className="flex max-w-[180px] flex-wrap gap-x-1 gap-y-1">
+      {values.map((value, index) => (
+        <span key={value.id} className="text-xs text-[#6253E8]">
+          {value.name}
+          {index < values.length - 1 ? "," : ""}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export function ProductsManager({
+  canCreate,
+  canUpdate,
+  canDelete,
+  canPurge,
+}: Props) {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [view, setView] = useState<View>("all");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [type, setType] = useState("");
+  const [sortBy, setSortBy] = useState<SortBy>("createdAt");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [pages, setPages] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [purgeProduct, setPurgeProduct] =
+    useState<Product | null>(null);
+  const [confirmId, setConfirmId] = useState("");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const value = searchInput.trim();
+      setSearch(value);
+      setPage(1);
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  const query = useMemo(() => {
+    const params = new URLSearchParams({
+      page: String(page),
+      limit: String(PAGE_SIZE),
+      trash: view === "trash" ? "trash" : "active",
+      sortBy,
+      sortOrder,
+    });
+
+    if (search) params.set("search", search);
+    if (type) params.set("type", type);
+
+    if (
+      view === "published" ||
+      view === "draft" ||
+      view === "private"
+    ) {
+      params.set("status", view);
+    }
+
+    return params.toString();
+  }, [page, view, search, type, sortBy, sortOrder]);
+
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      setLoading(true);
+      setError("");
+
+      try {
+        const result = await api<ProductList>(
+          `/api/admin/products?${query}`,
+          signal,
+        );
+
+        if (signal?.aborted) return;
+
+        setProducts(result.items);
+        setTotal(result.pagination.total);
+        setPages(Math.max(1, result.pagination.totalPages));
+      } catch (caught) {
+        if (signal?.aborted) return;
+
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "Unable to load products.",
+        );
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [query],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      if (!controller.signal.aborted) {
+        void load(controller.signal);
+      }
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [load, refreshKey]);
+
+  function refresh() {
+    setRefreshKey((value) => value + 1);
+  }
+
+  function changeView(next: View) {
+    setView(next);
+    setPage(1);
+    setNotice("");
+  }
+
+  async function performAction(
+    product: Product,
+    action: "trash" | "restore" | "permanent",
+  ) {
+    setBusyId(product.id);
+    setError("");
+    setNotice("");
+
+    try {
+      await api<unknown>(
+        `/api/admin/products/${product.id}?action=${action}`,
+        undefined,
+        action === "restore" ? "POST" : "DELETE",
+      );
+
+      setNotice(
+        action === "trash"
+          ? `"${product.name}" moved to Trash.`
+          : action === "restore"
+            ? `"${product.name}" restored.`
+            : `"${product.name}" permanently deleted.`,
+      );
+
+      if (action === "permanent") {
+        setPurgeProduct(null);
+        setConfirmId("");
+      }
+
+      if (products.length === 1 && page > 1) {
+        setPage((value) => value - 1);
+      } else {
+        refresh();
+      }
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Unable to complete action.",
+      );
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  function trashProduct(product: Product) {
+    if (!canDelete) return;
+
+    if (
+      window.confirm(
+        `Move "${product.name}" to Trash?`,
+      )
+    ) {
+      void performAction(product, "trash");
+    }
+  }
+
+  function sort(column: SortBy) {
+    setPage(1);
+
+    if (sortBy === column) {
+      setSortOrder((value) =>
+        value === "asc" ? "desc" : "asc",
+      );
+    } else {
+      setSortBy(column);
+      setSortOrder(column === "name" ? "asc" : "desc");
+    }
+  }
+
+  function renderSortIcon(column: SortBy) {
+    if (sortBy !== column) {
+      return <ArrowUp className="size-3 text-[#BEC5D2]" />;
+    }
+
+    return sortOrder === "asc" ? (
+      <ArrowUp className="size-3 text-[#6D5DF6]" />
+    ) : (
+      <ArrowDown className="size-3 text-[#6D5DF6]" />
+    );
+  }
+
+  function renderActions(product: Product) {
+    const deleted = product.isDeleted;
+
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        {!deleted && canUpdate && (
+          <Link
+            href={`/admin/products/${product.id}/edit`}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-[#6253E8] hover:bg-[#F1EDFF]"
+          >
+            <Pencil className="size-3.5" />
+            Edit
+          </Link>
+        )}
+
+        {!deleted && canDelete && (
+          <button
+            type="button"
+            disabled={busyId === product.id}
+            onClick={() => trashProduct(product)}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+          >
+            <Trash2 className="size-3.5" />
+            Trash
+          </button>
+        )}
+
+        {deleted && canUpdate && (
+          <button
+            type="button"
+            disabled={busyId === product.id}
+            onClick={() =>
+              void performAction(product, "restore")
+            }
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+          >
+            <RotateCcw className="size-3.5" />
+            Restore
+          </button>
+        )}
+
+        {deleted && canPurge && (
+          <button
+            type="button"
+            disabled={busyId === product.id}
+            onClick={() => {
+              setPurgeProduct(product);
+              setConfirmId("");
+            }}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+          >
+            <Trash2 className="size-3.5" />
+            Delete forever
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  const tabs: Array<{ id: View; label: string }> = [
+    { id: "all", label: "All" },
+    { id: "published", label: "Published" },
+    { id: "draft", label: "Draft" },
+    { id: "private", label: "Private" },
+    { id: "trash", label: "Trash" },
+  ];
+
+  return (
+    <div className="space-y-5 pb-8">
+      <header className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-[#8794AC]">
+            Catalog
+          </p>
+          <h1 className="mt-1 text-2xl font-bold text-[#172444]">
+            Products
+          </h1>
+          <p className="mt-1 text-sm text-[#8290AC]">
+            Manage products just like your WooCommerce catalog.
+          </p>
+        </div>
+
+        {canCreate && (
+          <Link
+            href="/admin/products/new"
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#6D5DF6] px-4 text-xs font-bold text-white hover:bg-[#5849DB]"
+          >
+            <Plus className="size-4" />
+            Add New Product
+          </Link>
+        )}
+      </header>
+
+      {notice && (
+        <div role="status" className="rounded-lg bg-emerald-50 p-3 text-xs text-emerald-700">
+          {notice}
+        </div>
+      )}
+
+      {error && (
+        <div role="alert" className="rounded-lg bg-red-50 p-3 text-xs text-red-700">
+          {error}
+        </div>
+      )}
+
+      <section className="overflow-hidden rounded-xl border border-[#E6E9F2] bg-white">
+        <div className="border-b border-[#EDF0F6] px-4 pt-4 sm:px-5">
+          <div className="flex gap-1 overflow-x-auto">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => changeView(tab.id)}
+                className={`shrink-0 border-b-2 px-3 pb-3 text-xs font-semibold transition ${
+                  view === tab.id
+                    ? "border-[#6D5DF6] text-[#6253E8]"
+                    : "border-transparent text-[#8290AC] hover:text-[#6253E8]"
+                }`}
+              >
+                {tab.label}
+                {tab.id === view && (
+                  <span className="ml-1.5 rounded-full bg-[#F0EDFF] px-1.5 py-0.5 text-[10px]">
+                    {total}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3 border-b border-[#EDF0F6] p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-0 flex-1 sm:w-64">
+              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#9DA8BA]" />
+              <input
+                type="search"
+                aria-label="Search products"
+                maxLength={100}
+                value={searchInput}
+                onChange={(event) =>
+                  setSearchInput(event.target.value)
+                }
+                placeholder="Search products..."
+                className="h-10 w-full rounded-lg border border-[#E4E8F1] bg-white pl-9 pr-3 text-xs outline-none focus:border-[#6D5DF6]"
+              />
+            </div>
+
+            <select
+              aria-label="Product type"
+              className={selectClass}
+              value={type}
+              onChange={(event) => {
+                setType(event.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">All types</option>
+              <option value="simple">Simple</option>
+              <option value="variable">Variable</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <SlidersHorizontal className="size-4 text-[#8B97B0]" />
+
+            <select
+              aria-label="Sort products"
+              className={selectClass}
+              value={sortBy}
+              onChange={(event) =>
+                sort(event.target.value as SortBy)
+              }
+            >
+              <option value="createdAt">Date created</option>
+              <option value="updatedAt">Last modified</option>
+              <option value="name">Name</option>
+              <option value="price">Price</option>
+            </select>
+
+            <button
+              type="button"
+              aria-label="Reverse sort order"
+              title="Reverse sort order"
+              onClick={() => {
+                setPage(1);
+                setSortOrder((value) =>
+                  value === "asc" ? "desc" : "asc",
+                );
+              }}
+              className="flex size-10 items-center justify-center rounded-lg border border-[#E4E8F1] text-[#6253E8]"
+            >
+              {sortOrder === "asc" ? (
+                <ArrowUp className="size-4" />
+              ) : (
+                <ArrowDown className="size-4" />
+              )}
+            </button>
+
+            <button
+              type="button"
+              disabled={loading}
+              title="Refresh products"
+              aria-label="Refresh products"
+              onClick={() => refresh()}
+              className="flex size-10 items-center justify-center rounded-lg border border-[#E4E8F1] text-[#71809E] disabled:opacity-40"
+            >
+              <RefreshCw className="size-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* DESKTOP TABLE */}
+        <div className="hidden overflow-x-auto md:block">
+          <table className="w-full min-w-[1060px] border-collapse text-left">
+            <thead className="border-b border-[#E8EBF3] bg-[#FAFBFD]">
+              <tr className="text-[11px] text-[#586784]">
+                <th className="w-[78px] px-4 py-3">Image</th>
+                <th className="min-w-[180px] px-3 py-3">
+                  <button
+                    type="button"
+                    onClick={() => sort("name")}
+                    className="flex items-center gap-1 font-semibold"
+                  >
+                    Name {renderSortIcon("name")}
+                  </button>
+                </th>
+                <th className="px-3 py-3">SKU</th>
+                <th className="px-3 py-3">Stock</th>
+                <th className="px-3 py-3">
+                  <button
+                    type="button"
+                    onClick={() => sort("price")}
+                    className="flex items-center gap-1 font-semibold"
+                  >
+                    Price {renderSortIcon("price")}
+                  </button>
+                </th>
+                <th className="px-3 py-3">Categories</th>
+                <th className="px-3 py-3">Tags</th>
+                <th className="px-3 py-3 text-center">
+                  <Star className="mx-auto size-4" />
+                </th>
+                <th className="px-3 py-3">Brand</th>
+                <th className="px-3 py-3">
+                  <button
+                    type="button"
+                    onClick={() => sort("createdAt")}
+                    className="flex items-center gap-1 font-semibold"
+                  >
+                    Date {renderSortIcon("createdAt")}
+                  </button>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#EBEDF3]">
+              {loading ? (
+                <tr>
+                  <td colSpan={10} className="py-16 text-center">
+                    <LoaderCircle className="mx-auto size-6 animate-spin text-[#6D5DF6]" />
+                  </td>
+                </tr>
+              ) : products.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="py-16 text-center text-sm text-[#8794AC]">
+                    No products found.
+                  </td>
+                </tr>
+              ) : (
+                products.map((product) => (
+                  <tr
+                    key={product.id}
+                    className="align-top transition-colors hover:bg-[#F9FAFE]"
+                  >
+                    <td className="px-4 py-4">
+                      <ProductImage
+                        key={product.featuredImage?.id ?? product.id}
+                        product={product}
+                      />
+                    </td>
+                    <td className="px-3 py-4">
+                      <Link
+                        href={`/admin/products/${product.id}/edit`}
+                        className="line-clamp-2 text-xs font-semibold leading-5 text-[#6253E8] hover:underline"
+                      >
+                        {product.name}
+                      </Link>
+                      <div className="mt-1 flex items-center gap-1.5">
+                        <Status product={product} />
+                        <span className="text-[10px] capitalize text-[#8995AB]">
+                          {product.type}
+                        </span>
+                      </div>
+                      <div className="mt-2">
+                        {renderActions(product)}
+                      </div>
+                    </td>
+                    <td className="max-w-[120px] break-all px-3 py-4 text-xs text-[#52617F]">
+                      {product.sku || "—"}
+                    </td>
+                    <td className="px-3 py-4">
+                      <Stock product={product} />
+                    </td>
+                    <td className="px-3 py-4">
+                      <Price product={product} />
+                    </td>
+                    <td className="px-3 py-4">
+                      <Taxonomy values={product.categories} />
+                    </td>
+                    <td className="px-3 py-4">
+                      <Taxonomy values={product.tags} />
+                    </td>
+                    <td className="px-3 py-4 text-center">
+                      <Star
+                        className={`mx-auto size-4 ${
+                          product.isFeatured
+                            ? "fill-amber-400 text-amber-400"
+                            : "text-[#B8C1D0]"
+                        }`}
+                      />
+                    </td>
+                    <td className="px-3 py-4 text-xs text-[#6253E8]">
+                      {product.brand?.name || "—"}
+                    </td>
+                    <td className="px-3 py-4">
+                      <p className="whitespace-nowrap text-[11px] text-[#52617F]">
+                        {product.isDeleted
+                          ? "Trashed"
+                          : product.status === "published"
+                            ? "Published"
+                            : "Modified"}
+                      </p>
+                      <p className="mt-1 whitespace-nowrap text-[11px] text-[#8794AC]">
+                        {new Date(product.createdAt).toLocaleDateString("fr-MA")}
+                      </p>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* MOBILE CARDS */}
+        <div className="grid gap-3 bg-[#F7F8FC] p-3 md:hidden">
+          {loading ? (
+            <div className="flex justify-center py-16">
+              <LoaderCircle className="size-7 animate-spin text-[#6D5DF6]" />
+            </div>
+          ) : products.length === 0 ? (
+            <div className="rounded-xl bg-white py-12 text-center text-xs text-[#8290AC]">
+              <Package className="mx-auto mb-3 size-7" />
+              No products found.
+            </div>
+          ) : (
+            products.map((product) => (
+              <article
+                key={product.id}
+                className="overflow-hidden rounded-xl border border-[#E7EAF2] bg-white p-4 shadow-sm"
+              >
+                <div className="flex items-start gap-3">
+                  <ProductImage
+                    key={product.featuredImage?.id ?? product.id}
+                    product={product}
+                    size="lg"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <Link
+                      href={`/admin/products/${product.id}/edit`}
+                      className="line-clamp-2 text-sm font-bold leading-5 text-[#6253E8]"
+                    >
+                      {product.name}
+                    </Link>
+                    <p className="mt-1 break-all text-[11px] text-[#8794AC]">
+                      SKU: {product.sku || "—"}
+                    </p>
+                    <div className="mt-2">
+                      <Status product={product} />
+                    </div>
+                  </div>
+                  <Star
+                    className={`size-5 shrink-0 ${
+                      product.isFeatured
+                        ? "fill-amber-400 text-amber-400"
+                        : "text-[#BAC2D0]"
+                    }`}
+                  />
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-[#F8F9FC] p-3">
+                  <div>
+                    <p className="mb-1 text-[10px] text-[#91A0B6]">
+                      Price
+                    </p>
+                    <Price product={product} />
+                  </div>
+                  <div>
+                    <p className="mb-1 text-[10px] text-[#91A0B6]">
+                      Stock
+                    </p>
+                    <Stock product={product} />
+                  </div>
+                  <div>
+                    <p className="mb-1 text-[10px] text-[#91A0B6]">
+                      Brand
+                    </p>
+                    <p className="text-xs text-[#52617F]">
+                      {product.brand?.name || "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="mb-1 text-[10px] text-[#91A0B6]">
+                      Date
+                    </p>
+                    <p className="text-xs text-[#52617F]">
+                      {new Date(product.createdAt).toLocaleDateString("fr-MA")}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-3 space-y-2 text-xs">
+                  <div className="flex gap-2">
+                    <span className="w-20 shrink-0 text-[#91A0B6]">
+                      Categories
+                    </span>
+                    <Taxonomy values={product.categories} />
+                  </div>
+                  <div className="flex gap-2">
+                    <span className="w-20 shrink-0 text-[#91A0B6]">
+                      Tags
+                    </span>
+                    <Taxonomy values={product.tags} />
+                  </div>
+                </div>
+
+                <div className="mt-3 border-t border-[#EDF0F5] pt-3">
+                  {renderActions(product)}
+                </div>
+              </article>
+            ))
+          )}
+        </div>
+
+        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-[#EDF0F6] px-4 py-4 sm:px-5">
+          <p className="text-xs text-[#8290AC]">
+            {total === 0
+              ? "0 products"
+              : `${(page - 1) * PAGE_SIZE + 1}–${Math.min(
+                  page * PAGE_SIZE,
+                  total,
+                )} of ${total}`}
+          </p>
+          <div className="flex items-center gap-2">
+            <span className="mr-1 text-xs text-[#8794AC]">
+              {page} / {pages}
+            </span>
+            <button
+              type="button"
+              aria-label="Previous page"
+              disabled={page <= 1 || loading}
+              onClick={() => setPage((p) => p - 1)}
+              className="rounded-lg border border-[#E4E8F1] p-2 disabled:opacity-40"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            <button
+              type="button"
+              aria-label="Next page"
+              disabled={page >= pages || loading}
+              onClick={() => setPage((p) => p + 1)}
+              className="rounded-lg border border-[#E4E8F1] p-2 disabled:opacity-40"
+            >
+              <ChevronRight className="size-4" />
+            </button>
+          </div>
+        </footer>
+      </section>
+
+      {purgeProduct && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#172444]/60 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="purge-heading"
+            className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <h2
+                id="purge-heading"
+                className="text-base font-bold text-red-700"
+              >
+                Permanently delete product
+              </h2>
+              <button
+                type="button"
+                disabled={busyId !== null}
+                aria-label="Close dialog"
+                onClick={() => setPurgeProduct(null)}
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+            <p className="mt-3 text-sm text-[#66748E]">
+              This cannot be undone. Type the product UUID to confirm.
+            </p>
+            <code className="mt-3 block break-all rounded-lg bg-[#F5F6FA] p-3 text-xs">
+              {purgeProduct.id}
+            </code>
+            <input
+              aria-label="Confirm product UUID"
+              autoComplete="off"
+              value={confirmId}
+              onChange={(e) => setConfirmId(e.target.value)}
+              className="mt-3 h-10 w-full rounded-lg border border-red-200 px-3 font-mono text-xs"
+            />
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={busyId !== null}
+                onClick={() => setPurgeProduct(null)}
+                className="rounded-lg border px-4 py-2 text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={
+                  busyId !== null ||
+                  confirmId.trim() !== purgeProduct.id
+                }
+                onClick={() =>
+                  void performAction(purgeProduct, "permanent")
+                }
+                className="rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                Delete forever
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

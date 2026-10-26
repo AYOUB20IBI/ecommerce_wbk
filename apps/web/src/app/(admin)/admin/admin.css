@@ -1,0 +1,148 @@
+/*
+ * Commerce Engine Admin Design System
+ * Scoped to .admin-theme. Dark mode: `.dark` class on <html> (next-themes).
+ */
+
+.admin-theme {
+  color-scheme: light;
+
+  --app-font-sans: var(--font-admin-geist), Arial, Helvetica, sans-serif;
+  --app-font-mono: var(--font-admin-geist-mono), monospace;
+
+  --background: #f5f6fb;
+  --foreground: #0f172a;
+
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+
+  --primary: #6d5df6;
+  --primary-foreground: #ffffff;
+
+  --secondary: #efecff;
+  --secondary-foreground: #4f3fd1;
+
+  --muted: #f1f3f9;
+  --muted-foreground: #64748b;
+
+  --accent: #efecff;
+  --accent-foreground: #4f3fd1;
+
+  --destructive: #dc2626;
+
+  --border: #e6e9f2;
+  --input: #dbe0ec;
+  --ring: #6d5df6;
+
+  --success: #0e9f6e;
+  --warning: #c26a05;
+  --info: #2f6fe4;
+  --danger: #e0294a;
+
+  --chart-1: #6d5df6;
+  --chart-2: #b3a8fb;
+  --chart-3: #38bdf8;
+  --chart-4: #34c99a;
+  --chart-5: #f5b84b;
+
+  --radius: 0.75rem;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #334155;
+  --sidebar-primary: #6d5df6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #efecff;
+  --sidebar-accent-foreground: #4f3fd1;
+  --sidebar-border: #e6e9f2;
+  --sidebar-ring: #6d5df6;
+
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 4%), 0 8px 24px -12px rgb(15 23 42 / 8%);
+  --shadow-pop: 0 20px 50px -12px rgb(15 23 42 / 22%);
+
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.dark .admin-theme {
+  color-scheme: dark;
+
+  --background: #0a0c13;
+  --foreground: #e8ebf4;
+
+  --card: #12151f;
+  --card-foreground: #e8ebf4;
+
+  --popover: #151925;
+  --popover-foreground: #e8ebf4;
+
+  --primary: #8b7dff;
+  --primary-foreground: #0a0c13;
+
+  --secondary: #1d1b38;
+  --secondary-foreground: #c4bdff;
+
+  --muted: #1a1e2b;
+  --muted-foreground: #8d96ab;
+
+  --accent: #1d1b38;
+  --accent-foreground: #c4bdff;
+
+  --destructive: #f87171;
+
+  --border: #232838;
+  --input: #2c3246;
+  --ring: #8b7dff;
+
+  --success: #34d399;
+  --warning: #fbbf24;
+  --info: #60a5fa;
+  --danger: #fb7185;
+
+  --chart-1: #8b7dff;
+  --chart-2: #4b4580;
+
+  --sidebar: #0f121b;
+  --sidebar-foreground: #c0c7d8;
+  --sidebar-primary: #8b7dff;
+  --sidebar-primary-foreground: #0a0c13;
+  --sidebar-accent: #1d1b38;
+  --sidebar-accent-foreground: #c4bdff;
+  --sidebar-border: #232838;
+  --sidebar-ring: #8b7dff;
+
+  --shadow-card: 0 1px 0 rgb(255 255 255 / 3%) inset, 0 10px 30px -14px rgb(0 0 0 / 60%);
+  --shadow-pop: 0 24px 60px -12px rgb(0 0 0 / 70%);
+}
+
+.admin-theme :focus-visible {
+  outline-color: var(--ring);
+}
+
+.admin-theme ::selection {
+  background: color-mix(in oklab, var(--primary) 30%, transparent);
+}
+
+/* Reusable surface */
+.admin-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 1.125rem;
+  box-shadow: var(--shadow-card);
+}
+
+/* Soft brand glow behind the page hero */
+.admin-hero {
+  background:
+    radial-gradient(60% 120% at 100% 0%, color-mix(in oklab, var(--primary) 22%, transparent), transparent 70%),
+    radial-gradient(50% 100% at 0% 100%, color-mix(in oklab, var(--info) 12%, transparent), transparent 70%),
+    var(--card);
+}
+
+/* Thin, theme-aware scrollbars */
+.admin-theme * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}

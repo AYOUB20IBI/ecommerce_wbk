@@ -1,0 +1,96 @@
+
+@keyframes admin-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes admin-chart-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes admin-donut-reveal {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes admin-sidebar-reveal {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.admin-section-enter {
+  animation: admin-fade-up 450ms ease-out both;
+}
+
+.admin-chart-enter {
+  animation: admin-chart-reveal 350ms ease-out both;
+}
+
+.admin-donut-enter {
+  animation: admin-donut-reveal 350ms ease-out both;
+}
+
+.admin-sidebar-enter {
+  animation: admin-sidebar-reveal 220ms ease-out both;
+}
+
+.admin-hover-card {
+  transition:
+    transform 200ms ease,
+    box-shadow 200ms ease,
+    border-color 200ms ease;
+}
+
+@media (hover: hover) {
+  .admin-hover-card:hover {
+    transform: translateY(-3px);
+    border-color: #ded9ff;
+    box-shadow: 0 12px 28px rgb(41 30 100 / 8%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-section-enter,
+  .admin-chart-enter,
+  .admin-donut-enter,
+  .admin-sidebar-enter {
+    animation: none;
+  }
+
+  .admin-hover-card {
+    transition: none;
+  }
+
+  .admin-hover-card:hover {
+    transform: none;
+  }
+}

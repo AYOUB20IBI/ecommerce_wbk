@@ -1,0 +1,65 @@
+
+/*
+ * Storefront Design System
+ * Independent from the Admin theme.
+ *
+ * Values are temporary defaults.
+ * They may later come from store settings.
+ */
+
+.storefront-theme {
+  color-scheme: light;
+
+  --app-font-sans:
+    Arial, Helvetica, sans-serif;
+
+  --app-font-mono: monospace;
+
+  --background: #ffffff;
+  --foreground: #202020;
+
+  --card: #ffffff;
+  --card-foreground: #202020;
+
+  --popover: #ffffff;
+  --popover-foreground: #202020;
+
+  --primary: #bd6b4c;
+  --primary-foreground: #ffffff;
+
+  --secondary: #f7eee9;
+  --secondary-foreground: #6f3e2b;
+
+  --muted: #f7f5f3;
+  --muted-foreground: #706b67;
+
+  --accent: #f7eee9;
+  --accent-foreground: #6f3e2b;
+
+  --destructive: #dc2626;
+
+  --border: #eae5df;
+  --input: #ded8d2;
+  --ring: #bd6b4c;
+
+  --chart-1: #bd6b4c;
+  --chart-2: #e5ae8e;
+  --chart-3: #6c8766;
+  --chart-4: #dbb86a;
+  --chart-5: #8c756c;
+
+  --radius: 0.5rem;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #202020;
+  --sidebar-primary: #bd6b4c;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f7eee9;
+  --sidebar-accent-foreground: #6f3e2b;
+  --sidebar-border: #eae5df;
+  --sidebar-ring: #bd6b4c;
+
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+}
