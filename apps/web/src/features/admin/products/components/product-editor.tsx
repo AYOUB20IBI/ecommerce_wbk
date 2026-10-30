@@ -3,62 +3,80 @@
 
 import {
   useEffect,
+  useRef,
   useState,
-  type FormEvent,
+  type ReactNode,
 } from "react";
-import { useRouter } from "next/navigation";
+
+import dynamic from "next/dynamic";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { LoaderCircle } from "lucide-react";
+
 import {
-  ArrowLeft,
-  Check,
-  Eye,
-  EyeOff,
-  LoaderCircle,
-  Package,
-  Save,
-  Sparkles,
-} from "lucide-react";
+  EditorField,
+  EditorPanel,
+  ProductEditorLayout,
+  type EditorTab,
+} from "./editor/product-editor-layout";
+
+import {
+  ProductPublishing,
+  type PublishingStatus,
+} from "./editor/product-publishing";
+
+import {
+  ProductTaxonomyFields,
+  type ProductTaxonomyValue,
+  type TaxonomyOption,
+} from "./editor/product-taxonomy-fields";
+
+import { ProductPricing } from "./editor/product-pricing";
+import { validatePrices } from "./editor/product-pricing.utils";
+
+import { ProductIdentifiers } from "./editor/product-identifiers";
+
+import {
+  validateIdentifiers,
+  toOptionalIdentifier,
+} from "./editor/product-identifiers.utils";
+
+import {
+  ProductStockManagement,
+  isValidStockQuantity,
+} from "./editor/product-stock-management";
+
+import {
+  ProductThumbnailField,
+  ProductGalleryField,
+  EMPTY_PRODUCT_IMAGES,
+  type ProductImageSelection,
+} from "./editor/product-image-fields";
+
+import {
+  loadProductImages,
+  synchronizeProductImages,
+  validateProductImages,
+  imageSelectionSignature,
+} from "./editor/save-product-images";
+
+const RichTextEditor = dynamic(
+  () => import("./editor/product-rich-text-editor"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-56 animate-pulse rounded-xl bg-[#F4F5FA]" />
+    ),
+  },
+);
 
 type ProductType = "simple" | "variable";
-type Status = "draft" | "published" | "private" | "archived";
-
-type Variant = {
-  id?: string;
-  sku: string | null;
-  ean: string | null;
-  regularPrice: string | null;
-  salePrice: string | null;
-  stockQuantity: number;
-  manageStock: boolean;
-  isActive: boolean;
-};
-
-type ProductDetail = {
-  id: string;
-  type: ProductType;
-  name: string;
-  slug: string;
-  status: Status;
-  description: string | null;
-  shortDescription: string | null;
-  seoTitle: string | null;
-  seoDescription: string | null;
-  isFeatured: boolean;
-  variants: Variant[];
-};
-
-type ApiResult<T> = {
-  success: boolean;
-  message?: string;
-  data?: T;
-  errors?: unknown;
-};
 
 type ProductForm = {
   name: string;
   slug: string;
   type: ProductType;
-  status: Status;
+  status: PublishingStatus;
   description: string;
   shortDescription: string;
   seoTitle: string;
@@ -71,6 +89,45 @@ type ProductForm = {
   stockQuantity: string;
   manageStock: boolean;
   isActive: boolean;
+};
+
+type ProductVariant = {
+  sku: string | null;
+  ean: string | null;
+  regularPrice: string | null;
+  salePrice: string | null;
+  stockQuantity: number;
+  manageStock: boolean;
+  isActive: boolean;
+};
+
+type ProductDetail = {
+  id: string;
+  name: string;
+  slug: string;
+  type: ProductType;
+  status: PublishingStatus;
+  description: string | null;
+  shortDescription: string | null;
+  seoTitle: string | null;
+  seoDescription: string | null;
+  isFeatured: boolean;
+  variants: ProductVariant[];
+};
+
+type ProductRelations = {
+  product: { id: string };
+  brand: TaxonomyOption | null;
+  categories: Array<
+    TaxonomyOption & { parent_id?: string | null }
+  >;
+  tags: TaxonomyOption[];
+};
+
+type ApiResult<T> = {
+  success: boolean;
+  message?: string;
+  data?: T;
 };
 
 const INITIAL: ProductForm = {
@@ -92,87 +149,11 @@ const INITIAL: ProductForm = {
   isActive: true,
 };
 
-const fieldClass =
-  "mt-2 h-11 w-full rounded-xl border border-[#E5E9F2] bg-white px-3 text-sm text-[#172444] outline-none transition focus:border-[#6D5DF6]";
-
-const textAreaClass =
-  "mt-2 w-full rounded-xl border border-[#E5E9F2] bg-white px-3 py-3 text-sm text-[#172444] outline-none transition focus:border-[#6D5DF6]";
-
-function slugify(text: string) {
-  return text
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-async function api<T>(
-  url: string,
-  options: RequestInit = {},
-): Promise<T> {
-  const response = await fetch(url, {
-    ...options,
-    credentials: "same-origin",
-    cache: "no-store",
-    headers: {
-      Accept: "application/json",
-      ...(options.body !== undefined
-        ? { "Content-Type": "application/json" }
-        : {}),
-    },
-  });
-
-  let result: ApiResult<T>;
-
-  try {
-    result = (await response.json()) as ApiResult<T>;
-  } catch {
-    throw new Error("Invalid API response.");
-  }
-
-  if (response.status === 401) {
-    window.location.replace("/admin/login");
-    throw new Error("Session expired.");
-  }
-
-  if (!response.ok || result.success !== true) {
-    const details =
-      result.errors !== undefined
-        ? ` ${JSON.stringify(result.errors).slice(0, 1200)}`
-        : "";
-
-    throw new Error(
-      (result.message || `HTTP ${response.status}`) + details,
-    );
-  }
-
-  if (result.data === undefined) {
-    throw new Error("API returned no data.");
-  }
-
-  return result.data;
-}
-
-function optionalText(value: string): string | null {
-  return value.trim() || null;
-}
-
-function optionalPrice(value: string): string | null {
-  return value.trim() || null;
-}
-
-function validPrice(value: string): boolean {
-  return /^(0|[1-9]\d{0,9})(\.\d{1,2})?$/.test(value);
-}
-
-function moneyCents(value: string): bigint {
-  const [whole, decimal = ""] = value.split(".");
-
-  return BigInt(whole) * BigInt(100) +
-    BigInt(decimal.padEnd(2, "0"));
-}
+const EMPTY_TAXONOMIES: ProductTaxonomyValue = {
+  categoryIds: [],
+  tagIds: [],
+  brandId: null,
+};
 
 const VARIABLE_TEMPLATE = JSON.stringify(
   {
@@ -207,6 +188,132 @@ const VARIABLE_TEMPLATE = JSON.stringify(
   2,
 );
 
+const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const fieldClass =
+  "h-11 w-full rounded-xl border border-[#E4E8F1] bg-white px-3 text-sm text-[#172444] outline-none focus:border-[#6D5DF6] focus:ring-2 focus:ring-[#6D5DF6]/10 disabled:bg-[#F8F9FC] disabled:opacity-60";
+
+const textareaClass =
+  "w-full rounded-xl border border-[#E4E8F1] bg-white px-3 py-3 text-sm leading-6 text-[#172444] outline-none focus:border-[#6D5DF6] disabled:opacity-60";
+
+function slugify(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function optional(value: string): string | null {
+  return value.trim() || null;
+}
+
+function normalizedTaxonomies(
+  value: ProductTaxonomyValue,
+): ProductTaxonomyValue {
+  return {
+    categoryIds: [...value.categoryIds].sort(),
+    tagIds: [...value.tagIds].sort(),
+    brandId: value.brandId,
+  };
+}
+
+function makeSnapshot(
+  form: ProductForm,
+  variableConfig: string,
+  taxonomies: ProductTaxonomyValue,
+  images: ProductImageSelection,
+): string {
+  return JSON.stringify({
+    form,
+    variableConfig,
+    taxonomies: normalizedTaxonomies(taxonomies),
+    images: imageSelectionSignature(images),
+  });
+}
+
+function taxonomiesEqual(
+  first: ProductTaxonomyValue,
+  second: ProductTaxonomyValue,
+): boolean {
+  return (
+    JSON.stringify(normalizedTaxonomies(first)) ===
+    JSON.stringify(normalizedTaxonomies(second))
+  );
+}
+
+function hasTaxonomies(value: ProductTaxonomyValue): boolean {
+  return (
+    value.categoryIds.length > 0 ||
+    value.tagIds.length > 0 ||
+    value.brandId !== null
+  );
+}
+
+async function api<T>(
+  url: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const response = await fetch(url, {
+    ...options,
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: {
+      Accept: "application/json",
+      ...(options.body === undefined
+        ? {}
+        : { "Content-Type": "application/json" }),
+    },
+  });
+
+  let body: ApiResult<T>;
+
+  try {
+    body = (await response.json()) as ApiResult<T>;
+  } catch {
+    throw new Error("Invalid server response.");
+  }
+
+  if (response.status === 401) {
+    window.location.replace("/admin/login");
+    throw new Error("Session expired.");
+  }
+
+  if (!response.ok || body.success !== true) {
+    throw new Error(
+      body.message || `Request failed (${response.status}).`,
+    );
+  }
+
+  if (body.data === undefined) {
+    throw new Error("Missing API response data.");
+  }
+
+  return body.data;
+}
+
+function PlannedSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-dashed border-[#DFE3EF] bg-[#FAFBFE] p-5">
+      <p className="text-sm font-bold text-[#172444]">
+        {title}
+      </p>
+      <div className="mt-2 text-xs leading-6 text-[#8290AC]">
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export function ProductEditor({
   productId,
   canCreate,
@@ -217,66 +324,181 @@ export function ProductEditor({
   canUpdate: boolean;
 }) {
   const router = useRouter();
-  const editing = Boolean(productId);
+
+  const [createdId, setCreatedId] =
+    useState<string | null>(null);
+
+  const currentId = productId ?? createdId;
+  const editing = Boolean(currentId);
+  const canSave = editing ? canUpdate : canCreate;
 
   const [form, setForm] = useState<ProductForm>(INITIAL);
-  const [product, setProduct] = useState<ProductDetail | null>(null);
+  const [original, setOriginal] =
+    useState<ProductDetail | null>(null);
+
+  const [tab, setTab] = useState<EditorTab>("general");
+
+  const [taxonomies, setTaxonomies] =
+    useState<ProductTaxonomyValue>(EMPTY_TAXONOMIES);
+
+  const [savedTaxonomies, setSavedTaxonomies] =
+    useState<ProductTaxonomyValue>(EMPTY_TAXONOMIES);
+
+  const [productImages, setProductImages] =
+    useState<ProductImageSelection>(EMPTY_PRODUCT_IMAGES);
+
+  const [savedImagesSignature, setSavedImagesSignature] =
+    useState(() =>
+      imageSelectionSignature(EMPTY_PRODUCT_IMAGES),
+    );
+
+  const [initialCategories, setInitialCategories] =
+    useState<TaxonomyOption[]>([]);
+
+  const [initialTags, setInitialTags] =
+    useState<TaxonomyOption[]>([]);
+
+  const [initialBrand, setInitialBrand] =
+    useState<TaxonomyOption | null>(null);
+
+  const [slugEdited, setSlugEdited] = useState(false);
+  const [loading, setLoading] = useState(Boolean(productId));
+
+  const [relationsReady, setRelationsReady] =
+    useState(!productId);
+
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
   const [variableConfig, setVariableConfig] =
     useState(VARIABLE_TEMPLATE);
 
-  const [loading, setLoading] = useState(editing);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [slugTouched, setSlugTouched] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [savedSnapshot, setSavedSnapshot] = useState(() =>
+    makeSnapshot(
+      INITIAL,
+      VARIABLE_TEMPLATE,
+      EMPTY_TAXONOMIES,
+      EMPTY_PRODUCT_IMAGES,
+    ),
+  );
 
+  const dirty =
+    makeSnapshot(
+      form,
+      variableConfig,
+      taxonomies,
+      productImages,
+    ) !== savedSnapshot;
+
+  const dirtyRef = useRef(false);
+  const leavingAfterSave = useRef(false);
+  const saveLock = useRef(false);
+
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
+
+  // Product, taxonomy relations and images load in parallel.
+  // If one fails, editing is blocked to prevent accidental
+  // deletion of existing assignments or images.
   useEffect(() => {
     if (!productId) return;
 
     const controller = new AbortController();
     let active = true;
 
-    api<ProductDetail>(
-      `/api/admin/products/${productId}`,
-      { signal: controller.signal },
-    )
-      .then((item) => {
+    void Promise.all([
+      api<ProductDetail>(
+        `/api/admin/products/${encodeURIComponent(productId)}`,
+        { signal: controller.signal },
+      ),
+      api<ProductRelations>(
+        `/api/admin/products/${encodeURIComponent(productId)}/taxonomies`,
+        { signal: controller.signal },
+      ),
+      loadProductImages(productId, controller.signal),
+    ])
+      .then(([product, relations, images]) => {
         if (!active) return;
 
-        setProduct(item);
+        if (
+          product.id !== productId ||
+          relations.product.id !== productId ||
+          !Array.isArray(relations.categories) ||
+          !Array.isArray(relations.tags)
+        ) {
+          throw new Error("Invalid product data.");
+        }
 
-        const firstVariant = item.variants?.[0];
+        const variant = product.variants?.[0];
 
-        setForm({
-          name: item.name,
-          slug: item.slug,
-          type: item.type,
-          status: item.status,
-          description: item.description ?? "",
-          shortDescription: item.shortDescription ?? "",
-          seoTitle: item.seoTitle ?? "",
-          seoDescription: item.seoDescription ?? "",
-          isFeatured: Boolean(item.isFeatured),
-          sku: firstVariant?.sku ?? "",
-          ean: firstVariant?.ean ?? "",
-          regularPrice: firstVariant?.regularPrice ?? "",
-          salePrice: firstVariant?.salePrice ?? "",
+        const nextForm: ProductForm = {
+          name: product.name,
+          slug: product.slug,
+          type: product.type,
+          status: product.status,
+          description: product.description ?? "",
+          shortDescription: product.shortDescription ?? "",
+          seoTitle: product.seoTitle ?? "",
+          seoDescription: product.seoDescription ?? "",
+          isFeatured: Boolean(product.isFeatured),
+          sku: variant?.sku ?? "",
+          ean: variant?.ean ?? "",
+          regularPrice: variant?.regularPrice ?? "",
+          salePrice: variant?.salePrice ?? "",
           stockQuantity: String(
-            firstVariant?.stockQuantity ?? 0,
+            variant?.stockQuantity ?? 0,
           ),
-          manageStock: firstVariant?.manageStock ?? true,
-          isActive: firstVariant?.isActive ?? true,
-        });
+          manageStock: variant?.manageStock ?? true,
+          isActive: variant?.isActive ?? true,
+        };
 
-        setSlugTouched(true);
+        const nextTaxonomies: ProductTaxonomyValue = {
+          categoryIds: relations.categories.map(
+            (item) => item.id,
+          ),
+          tagIds: relations.tags.map(
+            (item) => item.id,
+          ),
+          brandId: relations.brand?.id ?? null,
+        };
+
+        setOriginal(product);
+        setForm(nextForm);
+        setTaxonomies(nextTaxonomies);
+        setSavedTaxonomies(nextTaxonomies);
+        setProductImages(images);
+
+        setSavedImagesSignature(
+          imageSelectionSignature(images),
+        );
+
+        setInitialCategories(relations.categories);
+        setInitialTags(relations.tags);
+        setInitialBrand(relations.brand);
+
+        setSlugEdited(true);
+        setRelationsReady(true);
+
+        setSavedSnapshot(
+          makeSnapshot(
+            nextForm,
+            VARIABLE_TEMPLATE,
+            nextTaxonomies,
+            images,
+          ),
+        );
       })
       .catch((caught) => {
         if (!active) return;
 
+        setRelationsReady(false);
+
         setError(
           caught instanceof Error
             ? caught.message
-            : "Unable to load product.",
+            : "Unable to load product details.",
         );
       })
       .finally(() => {
@@ -289,6 +511,24 @@ export function ProductEditor({
     };
   }, [productId]);
 
+  useEffect(() => {
+    function beforeUnload(event: BeforeUnloadEvent) {
+      if (
+        dirtyRef.current &&
+        !leavingAfterSave.current
+      ) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    }
+
+    window.addEventListener("beforeunload", beforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", beforeUnload);
+    };
+  }, []);
+
   function update<K extends keyof ProductForm>(
     key: K,
     value: ProductForm[K],
@@ -299,606 +539,733 @@ export function ProductEditor({
     }));
   }
 
-  function changeName(name: string) {
+  function changeName(value: string) {
     setForm((previous) => ({
       ...previous,
-      name,
-      slug: slugTouched ? previous.slug : slugify(name),
+      name: value,
+      slug: slugEdited
+        ? previous.slug
+        : slugify(value),
     }));
   }
 
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function buildVariant(
+    targetStatus: PublishingStatus,
+  ): ProductVariant {
+    const pricing = validatePrices(
+      form.regularPrice,
+      form.salePrice,
+      targetStatus === "published",
+    );
 
-    if (saving || loading) return;
+    if (!pricing.valid) {
+      setTab("general");
 
-    if (editing && !canUpdate) {
-      setError("You need products.update permission.");
-      return;
+      throw new Error(
+        pricing.regularError ??
+          pricing.saleError ??
+          "Invalid product pricing.",
+      );
     }
 
-    if (!editing && !canCreate) {
-      setError("You need products.create permission.");
+    const identifiers = validateIdentifiers(form.sku, form.ean);
+
+    if (!identifiers.valid) {
+      setTab("inventory");
+
+      throw new Error(
+        identifiers.skuError ??
+          identifiers.eanError ??
+          "Invalid product identifiers.",
+      );
+    }
+
+    if (
+      form.manageStock &&
+      !isValidStockQuantity(form.stockQuantity)
+    ) {
+      setTab("inventory");
+      throw new Error("Enter a valid stock quantity.");
+    }
+
+    const quantity = isValidStockQuantity(form.stockQuantity)
+      ? Number(form.stockQuantity)
+      : 0;
+
+    if (
+      targetStatus === "published" &&
+      !form.isActive
+    ) {
+      setTab("inventory");
+      throw new Error(
+        "Publishing requires an active variant.",
+      );
+    }
+
+    return {
+      sku: toOptionalIdentifier(form.sku),
+      ean: toOptionalIdentifier(form.ean),
+      regularPrice: optional(form.regularPrice),
+      salePrice: optional(form.salePrice),
+      stockQuantity: quantity,
+      manageStock: form.manageStock,
+      isActive: form.isActive,
+    };
+  }
+
+  async function save(targetStatus: PublishingStatus) {
+    if (
+      saveLock.current ||
+      saving ||
+      loading ||
+      !canSave ||
+      !relationsReady
+    ) {
       return;
     }
 
     setError("");
+    setNotice("");
 
-    if (!form.name.trim() || !form.slug.trim()) {
-      setError("Product name and slug are required.");
+    if (
+      !form.name.trim() ||
+      !form.slug.trim() ||
+      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(form.slug)
+    ) {
+      setError(
+        "A valid product name and slug are required.",
+      );
       return;
     }
 
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(form.slug)) {
-      setError("Slug must contain lowercase letters, numbers and hyphens.");
+    if (
+      form.description.length > 100000 ||
+      form.shortDescription.length > 5000
+    ) {
+      setError("Description exceeds the allowed size.");
+      return;
+    }
+
+    if (
+      taxonomies.categoryIds.length > 100 ||
+      taxonomies.tagIds.length > 100 ||
+      new Set(taxonomies.categoryIds).size !==
+        taxonomies.categoryIds.length ||
+      new Set(taxonomies.tagIds).size !==
+        taxonomies.tagIds.length
+    ) {
+      setError("Invalid taxonomy selection.");
+      return;
+    }
+
+    if (
+      [
+        ...taxonomies.categoryIds,
+        ...taxonomies.tagIds,
+        ...(taxonomies.brandId
+          ? [taxonomies.brandId]
+          : []),
+      ].some((id) => !UUID.test(id))
+    ) {
+      setError("Invalid taxonomy ID.");
+      return;
+    }
+
+    try {
+      validateProductImages(productImages);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Invalid product images.",
+      );
       return;
     }
 
     const common = {
       name: form.name.trim(),
-      slug: form.slug.trim(),
-      status: form.status,
-      description: optionalText(form.description),
-      shortDescription: optionalText(form.shortDescription),
-      seoTitle: optionalText(form.seoTitle),
-      seoDescription: optionalText(form.seoDescription),
+      slug: form.slug,
+      status: targetStatus,
+      description: optional(form.description),
+      shortDescription: optional(form.shortDescription),
+      seoTitle: optional(form.seoTitle),
+      seoDescription: optional(form.seoDescription),
       isFeatured: form.isFeatured,
     };
 
+    let simpleVariant: ProductVariant | null = null;
+
+    if (form.type === "simple") {
+      try {
+        simpleVariant = buildVariant(targetStatus);
+      } catch (caught) {
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "Invalid variant data.",
+        );
+        return;
+      }
+    }
+
+    // Validate variable-product JSON before performing
+    // any database write.
+    let variablePayload: {
+      attributes: unknown[];
+      variants: unknown[];
+    } | null = null;
+
+    if (!currentId && form.type === "variable") {
+      try {
+        const parsed: unknown = JSON.parse(variableConfig);
+
+        if (
+          typeof parsed !== "object" ||
+          parsed === null ||
+          Array.isArray(parsed) ||
+          !("attributes" in parsed) ||
+          !("variants" in parsed) ||
+          !Array.isArray(parsed.attributes) ||
+          !Array.isArray(parsed.variants)
+        ) {
+          throw new Error("Invalid variable configuration.");
+        }
+
+        variablePayload = {
+          attributes: parsed.attributes,
+          variants: parsed.variants,
+        };
+      } catch {
+        setError("Invalid variable product JSON.");
+        setTab("variations");
+        return;
+      }
+    }
+
+    saveLock.current = true;
     setSaving(true);
 
+    let savedProductId = currentId ?? null;
+    let productWriteSucceeded = false;
+    let lastStage = "product";
+
     try {
-      if (editing && productId) {
-        if (product?.type === "variable") {
+      if (savedProductId) {
+        if (
+          original?.type === "variable" ||
+          form.type === "variable"
+        ) {
           await api(
-            `/api/admin/products/${productId}?action=variable`,
+            `/api/admin/products/${encodeURIComponent(savedProductId)}?action=variable`,
             {
               method: "PATCH",
               body: JSON.stringify(common),
             },
           );
         } else {
-          const variant = buildVariant();
-
           await api(
-            `/api/admin/products/${productId}`,
+            `/api/admin/products/${encodeURIComponent(savedProductId)}`,
             {
               method: "PATCH",
               body: JSON.stringify({
                 ...common,
-                variant,
+                variant: simpleVariant,
               }),
             },
           );
         }
-      } else if (form.type === "simple") {
-        const variant = buildVariant();
-
-        await api("/api/admin/products", {
-          method: "POST",
-          body: JSON.stringify({
-            ...common,
-            type: "simple",
-            variant,
-          }),
-        });
       } else {
-        let variable: unknown;
+        const payload =
+          form.type === "simple"
+            ? {
+                ...common,
+                type: "simple" as const,
+                variant: simpleVariant,
+              }
+            : {
+                ...common,
+                type: "variable" as const,
+                ...variablePayload,
+              };
 
-        try {
-          variable = JSON.parse(variableConfig);
-        } catch {
+        const created = await api<{ id: string }>(
+          "/api/admin/products",
+          {
+            method: "POST",
+            body: JSON.stringify(payload),
+          },
+        );
+
+        if (!created || !UUID.test(created.id)) {
           throw new Error(
-            "Invalid JSON for attributes and variants.",
+            "Product may have been created but no valid ID was returned. Check Products before retrying.",
           );
         }
 
+        savedProductId = created.id;
+        setCreatedId(created.id);
+      }
+
+      productWriteSucceeded = true;
+
+      if (!savedProductId) {
+        throw new Error("Missing saved product ID.");
+      }
+
+      lastStage = "taxonomies";
+
+      const shouldSaveTaxonomies = productId
+        ? !taxonomiesEqual(taxonomies, savedTaxonomies)
+        : hasTaxonomies(taxonomies);
+
+      if (shouldSaveTaxonomies) {
+        if (!canUpdate) {
+          throw new Error(
+            "Assigning taxonomies requires products.update permission.",
+          );
+        }
+
+        await api<ProductRelations>(
+          `/api/admin/products/${encodeURIComponent(savedProductId)}/taxonomies`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              categoryIds: taxonomies.categoryIds,
+              tagIds: taxonomies.tagIds,
+              brandId: taxonomies.brandId,
+            }),
+          },
+        );
+      }
+
+      lastStage = "images";
+
+      const currentImageSignature =
+        imageSelectionSignature(productImages);
+
+      if (
+        currentImageSignature !== savedImagesSignature ||
+        !productId
+      ) {
         if (
-          !variable ||
-          typeof variable !== "object" ||
-          Array.isArray(variable) ||
-          !("attributes" in variable) ||
-          !("variants" in variable) ||
-          !Array.isArray(variable.attributes) ||
-          !Array.isArray(variable.variants)
+          (productImages.thumbnail ||
+            productImages.gallery.length > 0 ||
+            productId) &&
+          !canUpdate
         ) {
           throw new Error(
-            "Variable configuration requires attributes and variants arrays.",
+            "Saving product images requires products.update permission.",
           );
         }
 
-        await api("/api/admin/products", {
-          method: "POST",
-          body: JSON.stringify({
-            ...common,
-            type: "variable",
-            attributes: variable.attributes,
-            variants: variable.variants,
-          }),
-        });
+        if (canUpdate) {
+          await synchronizeProductImages(
+            savedProductId,
+            productImages,
+          );
+        }
       }
+
+      const savedForm: ProductForm = {
+        ...form,
+        status: targetStatus,
+      };
+
+      setForm(savedForm);
+      setSavedTaxonomies(taxonomies);
+
+      setSavedImagesSignature(
+        imageSelectionSignature(productImages),
+      );
+
+      setSavedSnapshot(
+        makeSnapshot(
+          savedForm,
+          variableConfig,
+          taxonomies,
+          productImages,
+        ),
+      );
+
+      leavingAfterSave.current = true;
 
       router.push("/admin/products");
       router.refresh();
     } catch (caught) {
-      setError(
+      const message =
         caught instanceof Error
           ? caught.message
-          : "Unable to save product.",
-      );
+          : "Unable to save product.";
+
+      if (productWriteSucceeded && savedProductId) {
+        setError(
+          `Product details were saved, but ${lastStage} could not be completed: ${message} You can retry without creating a duplicate product.`,
+        );
+
+        setNotice(
+          `Saved Product ID: ${savedProductId}`,
+        );
+      } else {
+        setError(message);
+      }
     } finally {
+      saveLock.current = false;
       setSaving(false);
     }
   }
 
-  function buildVariant() {
-    const regular = optionalPrice(form.regularPrice);
-    const sale = optionalPrice(form.salePrice);
-    const stock = Number(form.stockQuantity);
-
-    if (regular !== null && !validPrice(regular)) {
-      throw new Error("Invalid regular price.");
-    }
-
-    if (sale !== null && !validPrice(sale)) {
-      throw new Error("Invalid sale price.");
-    }
-
-    if (
-      sale !== null &&
-      (regular === null ||
-        moneyCents(sale) > moneyCents(regular))
-    ) {
-      throw new Error(
-        "Sale price cannot exceed regular price.",
-      );
-    }
-
-    if (
-      !Number.isSafeInteger(stock) ||
-      stock < 0 ||
-      stock > 2147483647
-    ) {
-      throw new Error("Invalid stock quantity.");
-    }
-
-    if (
-      form.status === "published" &&
-      (regular === null || !form.isActive)
-    ) {
-      throw new Error(
-        "Published simple products require an active variant with a price.",
-      );
-    }
-
-    return {
-      sku: optionalText(form.sku),
-      ean: optionalText(form.ean),
-      regularPrice: regular,
-      salePrice: sale,
-      stockQuantity: stock,
-      manageStock: form.manageStock,
-      isActive: form.isActive,
-    };
-  }
-
   if (loading) {
     return (
-      <div className="flex min-h-[50vh] items-center justify-center">
+      <div className="flex min-h-[65vh] items-center justify-center">
         <LoaderCircle className="size-8 animate-spin text-[#6D5DF6]" />
       </div>
     );
   }
 
-  return (
-    <div className="mx-auto max-w-[1250px] space-y-6 pb-10">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <Link
-            href="/admin/products"
-            className="inline-flex items-center gap-2 text-xs font-semibold text-[#6D5DF6]"
-          >
-            <ArrowLeft className="size-4" />
-            Back to Products
-          </Link>
+  const disabled = saving || !canSave || !relationsReady;
 
-          <p className="mt-4 text-xs font-semibold uppercase tracking-widest text-[#8794AC]">
-            Catalog Management
+  const nameContent = (
+    <div className="space-y-5">
+      <EditorField label="Product Name *">
+        <input
+          required
+          disabled={disabled}
+          maxLength={255}
+          value={form.name}
+          onChange={(event) => changeName(event.target.value)}
+          placeholder="Enter a product name"
+          className={fieldClass}
+        />
+      </EditorField>
+
+      <EditorField
+        label="Product Slug *"
+        hint="Changing an existing slug may affect product URLs."
+      >
+        <input
+          required
+          disabled={disabled}
+          maxLength={255}
+          value={form.slug}
+          onChange={(event) => {
+            setSlugEdited(true);
+            update("slug", slugify(event.target.value));
+          }}
+          placeholder="product-name"
+          className={fieldClass}
+        />
+      </EditorField>
+    </div>
+  );
+
+  const descriptionContent = (
+    <RichTextEditor
+      label="Product Description"
+      value={form.description}
+      onChange={(value) => update("description", value)}
+      maxLength={100000}
+      minHeight={280}
+      disabled={disabled}
+    />
+  );
+
+  const shortDescriptionContent = (
+    <RichTextEditor
+      label="Short Description"
+      value={form.shortDescription}
+      onChange={(value) => update("shortDescription", value)}
+      maxLength={5000}
+      minHeight={170}
+      disabled={disabled}
+    />
+  );
+
+  let tabContent: ReactNode;
+
+  if (tab === "general") {
+    tabContent = (
+      <div className="space-y-5">
+        <EditorField label="Product Type">
+          <select
+            value={form.type}
+            disabled={editing || disabled}
+            onChange={(event) =>
+              update(
+                "type",
+                event.target.value as ProductType,
+              )
+            }
+            className={fieldClass}
+          >
+            <option value="simple">Simple Product</option>
+            <option value="variable">Variable Product</option>
+          </select>
+        </EditorField>
+
+        {form.type === "simple" ? (
+          <ProductPricing
+            regularPrice={form.regularPrice}
+            salePrice={form.salePrice}
+            onRegularPriceChange={(value) =>
+              update("regularPrice", value)
+            }
+            onSalePriceChange={(value) =>
+              update("salePrice", value)
+            }
+            requireRegular={form.status === "published"}
+            disabled={disabled}
+          />
+        ) : (
+          <PlannedSection title="Variable Product Pricing">
+            Prices are managed independently per variation.
+            The visual variation builder follows in AD.4.3.8.
+          </PlannedSection>
+        )}
+      </div>
+    );
+  } else if (tab === "inventory") {
+    tabContent =
+      form.type === "simple" ? (
+        <div className="space-y-6">
+          <ProductIdentifiers
+            sku={form.sku}
+            ean={form.ean}
+            onSkuChange={(value) =>
+              update("sku", value)
+            }
+            onEanChange={(value) =>
+              update("ean", value)
+            }
+            disabled={disabled}
+          />
+
+          <div className="border-t border-[#EDF0F6] pt-5">
+            <ProductStockManagement
+              manageStock={form.manageStock}
+              stockQuantity={form.stockQuantity}
+              isActive={form.isActive}
+              onManageStockChange={(value) =>
+                update("manageStock", value)
+              }
+              onStockQuantityChange={(value) =>
+                update("stockQuantity", value)
+              }
+              onIsActiveChange={(value) =>
+                update("isActive", value)
+              }
+              disabled={disabled}
+            />
+          </div>
+        </div>
+      ) : (
+        <PlannedSection title="Variable Product Inventory">
+          Inventory is managed per variation.
+          The visual builder follows in AD.4.3.8.
+        </PlannedSection>
+      );
+  } else if (tab === "variations") {
+    tabContent = editing ? (
+      <PlannedSection title="Variations">
+        Existing variations are preserved.
+        The visual builder follows in AD.4.3.8.
+      </PlannedSection>
+    ) : (
+      <div className="space-y-4">
+        <PlannedSection title="Technical Variable Configuration">
+          Use real attribute and value UUIDs.
+          The visual builder follows in AD.4.3.8.
+        </PlannedSection>
+
+        <textarea
+          disabled={disabled}
+          value={variableConfig}
+          onChange={(event) =>
+            setVariableConfig(event.target.value)
+          }
+          rows={18}
+          spellCheck={false}
+          aria-label="Variable attributes and variants JSON"
+          className={`${textareaClass} font-mono text-xs`}
+        />
+      </div>
+    );
+  } else if (tab === "seo") {
+    tabContent = (
+      <div className="space-y-5">
+        <EditorField label="SEO Title">
+          <input
+            disabled={disabled}
+            maxLength={255}
+            value={form.seoTitle}
+            onChange={(event) =>
+              update("seoTitle", event.target.value)
+            }
+            className={fieldClass}
+          />
+        </EditorField>
+
+        <EditorField label="Meta Description">
+          <textarea
+            disabled={disabled}
+            rows={4}
+            maxLength={2000}
+            value={form.seoDescription}
+            onChange={(event) =>
+              update("seoDescription", event.target.value)
+            }
+            className={textareaClass}
+          />
+        </EditorField>
+
+        <div className="rounded-xl border border-[#E5E9F2] p-4">
+          <p className="text-[11px] text-[#8794AC]">
+            Search Result Preview
           </p>
 
-          <h1 className="mt-1 text-2xl font-bold text-[#172444]">
-            {editing ? "Edit Product" : "Create Product"}
-          </h1>
+          <p className="mt-2 text-sm font-semibold text-[#3556AF]">
+            {form.seoTitle || form.name || "Product Title"}
+          </p>
 
-          <p className="mt-1 text-sm text-[#8290AC]">
-            Manage product information, pricing and inventory.
+          <p className="mt-1 text-xs text-emerald-700">
+            /products/{form.slug || "product-slug"}
+          </p>
+
+          <p className="mt-2 text-xs text-[#66748E]">
+            {form.seoDescription ||
+              "Add a meta description to preview your search snippet."}
           </p>
         </div>
-
-        <span className="rounded-xl bg-[#EFECFF] px-4 py-2 text-xs font-bold capitalize text-[#6D5DF6]">
-          {form.status}
-        </span>
       </div>
+    );
+  } else {
+    const labels: Record<
+      "shipping" | "linked" | "attributes" | "advanced",
+      string
+    > = {
+      shipping: "Shipping Settings",
+      linked: "Linked Products",
+      attributes: "Product Attributes",
+      advanced: "Advanced Settings",
+    };
 
+    const selected = tab as keyof typeof labels;
+
+    tabContent = (
+      <PlannedSection title={labels[selected]}>
+        This section will be connected to validated backend APIs
+        in its dedicated implementation step.
+      </PlannedSection>
+    );
+  }
+
+  const sidebar = (
+    <>
+      <ProductPublishing
+        status={form.status}
+        onStatusChange={(status) =>
+          update("status", status)
+        }
+        featured={form.isFeatured}
+        onFeaturedChange={(featured) =>
+          update("isFeatured", featured)
+        }
+        editing={editing}
+        saving={saving}
+        disabled={disabled}
+        dirty={dirty}
+        onSave={() => void save(form.status)}
+        onSaveDraft={() => void save("draft")}
+      />
+
+      <EditorPanel title="Product Categories">
+        <ProductTaxonomyFields
+          value={taxonomies}
+          onChange={setTaxonomies}
+          initialCategories={initialCategories}
+          initialTags={initialTags}
+          initialBrand={initialBrand}
+          disabled={disabled}
+        />
+      </EditorPanel>
+
+      <EditorPanel title="Product Thumbnail">
+        <ProductThumbnailField
+          value={productImages}
+          onChange={setProductImages}
+          disabled={disabled}
+        />
+      </EditorPanel>
+
+      <EditorPanel title="Product Gallery">
+        <ProductGalleryField
+          value={productImages}
+          onChange={setProductImages}
+          disabled={disabled}
+        />
+      </EditorPanel>
+
+      <EditorPanel title="SEO">
+        <button
+          type="button"
+          onClick={() => setTab("seo")}
+          className="text-xs font-semibold text-[#6D5DF6] hover:underline"
+        >
+          Edit SEO Title & Meta Description
+        </button>
+      </EditorPanel>
+    </>
+  );
+
+  return (
+    <div>
       {error && (
         <div
           role="alert"
-          className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+          className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
         >
           {error}
+
+          {createdId && (
+            <div className="mt-3">
+              <Link
+                href={`/admin/products/${createdId}/edit`}
+                className="font-semibold text-[#6554D8] underline"
+              >
+                Edit Saved Product
+              </Link>
+            </div>
+          )}
         </div>
       )}
 
-      <form onSubmit={(event) => void save(event)}>
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_310px]">
-          <div className="space-y-6">
-            <section className="rounded-2xl border border-[#E9EDF6] bg-white p-5 sm:p-6">
-              <h2 className="flex items-center gap-2 text-sm font-bold text-[#172444]">
-                <Package className="size-4 text-[#6D5DF6]" />
-                General Information
-              </h2>
-
-              <div className="mt-5 space-y-4">
-                {!editing && (
-                  <label className="block text-xs font-semibold text-[#465575]">
-                    Product Type
-                    <select
-                      value={form.type}
-                      onChange={(event) =>
-                        update(
-                          "type",
-                          event.target.value as ProductType,
-                        )
-                      }
-                      className={fieldClass}
-                    >
-                      <option value="simple">Simple Product</option>
-                      <option value="variable">Variable Product</option>
-                    </select>
-                  </label>
-                )}
-
-                <label className="block text-xs font-semibold text-[#465575]">
-                  Product Name *
-                  <input
-                    required
-                    maxLength={255}
-                    value={form.name}
-                    onChange={(event) =>
-                      changeName(event.target.value)
-                    }
-                    className={fieldClass}
-                    placeholder="Product name"
-                  />
-                </label>
-
-                <label className="block text-xs font-semibold text-[#465575]">
-                  Slug *
-                  <input
-                    required
-                    maxLength={255}
-                    value={form.slug}
-                    onChange={(event) => {
-                      setSlugTouched(true);
-                      update(
-                        "slug",
-                        slugify(event.target.value),
-                      );
-                    }}
-                    className={fieldClass}
-                    placeholder="product-name"
-                  />
-                </label>
-
-                <label className="block text-xs font-semibold text-[#465575]">
-                  Short Description
-                  <textarea
-                    maxLength={5000}
-                    rows={3}
-                    value={form.shortDescription}
-                    onChange={(event) =>
-                      update(
-                        "shortDescription",
-                        event.target.value,
-                      )
-                    }
-                    className={textAreaClass}
-                  />
-                </label>
-
-                <label className="block text-xs font-semibold text-[#465575]">
-                  Full Description
-                  <textarea
-                    maxLength={100000}
-                    rows={8}
-                    value={form.description}
-                    onChange={(event) =>
-                      update(
-                        "description",
-                        event.target.value,
-                      )
-                    }
-                    className={textAreaClass}
-                  />
-                </label>
-              </div>
-            </section>
-
-            {(form.type === "simple") && (
-              <section className="rounded-2xl border border-[#E9EDF6] bg-white p-5 sm:p-6">
-                <h2 className="text-sm font-bold text-[#172444]">
-                  Pricing & Inventory
-                </h2>
-
-                <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                  {(
-                    [
-                      ["regularPrice", "Regular Price"],
-                      ["salePrice", "Sale Price"],
-                      ["sku", "SKU (optional)"],
-                      ["ean", "EAN (optional)"],
-                    ] as const
-                  ).map(([key, label]) => (
-                    <label
-                      key={key}
-                      className="block text-xs font-semibold text-[#465575]"
-                    >
-                      {label}
-                      <input
-                        type="text"
-                        maxLength={
-                          key === "ean"
-                            ? 32
-                            : key === "sku"
-                              ? 100
-                              : undefined
-                        }
-                        value={form[key]}
-                        onChange={(event) =>
-                          update(key, event.target.value)
-                        }
-                        placeholder={
-                          key.includes("Price")
-                            ? "99.00"
-                            : ""
-                        }
-                        className={fieldClass}
-                      />
-                    </label>
-                  ))}
-
-                  <label className="block text-xs font-semibold text-[#465575]">
-                    Stock Quantity
-                    <input
-                      required
-                      type="number"
-                      min={0}
-                      max={2147483647}
-                      step={1}
-                      value={form.stockQuantity}
-                      onChange={(event) =>
-                        update(
-                          "stockQuantity",
-                          event.target.value,
-                        )
-                      }
-                      className={fieldClass}
-                    />
-                  </label>
-                </div>
-
-                <div className="mt-5 flex flex-wrap gap-5">
-                  <label className="flex items-center gap-2 text-xs font-semibold text-[#465575]">
-                    <input
-                      type="checkbox"
-                      checked={form.manageStock}
-                      onChange={(event) =>
-                        update(
-                          "manageStock",
-                          event.target.checked,
-                        )
-                      }
-                      className="accent-[#6D5DF6]"
-                    />
-                    Manage Stock
-                  </label>
-
-                  <label className="flex items-center gap-2 text-xs font-semibold text-[#465575]">
-                    <input
-                      type="checkbox"
-                      checked={form.isActive}
-                      onChange={(event) =>
-                        update(
-                          "isActive",
-                          event.target.checked,
-                        )
-                      }
-                      className="accent-[#6D5DF6]"
-                    />
-                    Active Variant
-                  </label>
-                </div>
-              </section>
-            )}
-
-            {!editing && form.type === "variable" && (
-              <section className="rounded-2xl border border-[#E9EDF6] bg-white p-5 sm:p-6">
-                <h2 className="text-sm font-bold text-[#172444]">
-                  Variable Product Configuration
-                </h2>
-
-                <p className="mt-2 text-xs leading-6 text-[#8290AC]">
-                  This advanced configuration uses the existing
-                  attributes and values UUIDs in your database.
-                  The visual attribute and variant builder will
-                  follow in AD.4.4.
-                </p>
-
-                <textarea
-                  aria-label="Variable attributes and variants JSON"
-                  rows={18}
-                  spellCheck={false}
-                  value={variableConfig}
-                  onChange={(event) =>
-                    setVariableConfig(event.target.value)
-                  }
-                  className={`${textAreaClass} font-mono text-xs`}
-                />
-              </section>
-            )}
-
-            {editing && form.type === "variable" && (
-              <section className="rounded-2xl border border-[#E9EDF6] bg-white p-5 sm:p-6">
-                <h2 className="text-sm font-bold text-[#172444]">
-                  Variants
-                </h2>
-
-                <p className="mt-2 text-xs text-[#8290AC]">
-                  This page edits the variable product&apos;s general
-                  information. Editing individual variants,
-                  attributes and their order will be handled
-                  separately in AD.4.4.
-                </p>
-
-                <p className="mt-3 text-xs font-semibold text-[#6554D8]">
-                  {product?.variants?.length ?? 0} variants
-                </p>
-              </section>
-            )}
-
-            <section className="rounded-2xl border border-[#E9EDF6] bg-white p-5 sm:p-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-bold text-[#172444]">
-                  SEO Settings
-                </h2>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    setShowAdvanced((value) => !value)
-                  }
-                  className="flex items-center gap-2 text-xs font-semibold text-[#6D5DF6]"
-                >
-                  {showAdvanced ? (
-                    <EyeOff className="size-4" />
-                  ) : (
-                    <Eye className="size-4" />
-                  )}
-                  {showAdvanced ? "Hide" : "Show"}
-                </button>
-              </div>
-
-              {showAdvanced && (
-                <div className="mt-5 space-y-4">
-                  <label className="block text-xs font-semibold text-[#465575]">
-                    SEO Title
-                    <input
-                      maxLength={255}
-                      value={form.seoTitle}
-                      onChange={(event) =>
-                        update(
-                          "seoTitle",
-                          event.target.value,
-                        )
-                      }
-                      className={fieldClass}
-                    />
-                  </label>
-
-                  <label className="block text-xs font-semibold text-[#465575]">
-                    SEO Description
-                    <textarea
-                      maxLength={2000}
-                      rows={4}
-                      value={form.seoDescription}
-                      onChange={(event) =>
-                        update(
-                          "seoDescription",
-                          event.target.value,
-                        )
-                      }
-                      className={textAreaClass}
-                    />
-                  </label>
-                </div>
-              )}
-            </section>
-          </div>
-
-          <aside className="space-y-5">
-            <section className="rounded-2xl border border-[#E9EDF6] bg-white p-5">
-              <h2 className="text-sm font-bold text-[#172444]">
-                Publishing
-              </h2>
-
-              <label className="mt-5 block text-xs font-semibold text-[#465575]">
-                Product Status
-                <select
-                  value={form.status}
-                  onChange={(event) =>
-                    update(
-                      "status",
-                      event.target.value as Status,
-                    )
-                  }
-                  className={fieldClass}
-                >
-                  <option value="draft">Draft</option>
-                  <option value="published">Published</option>
-                  <option value="private">Private</option>
-                  <option value="archived">Archived</option>
-                </select>
-              </label>
-
-              <label className="mt-5 flex items-center gap-3 rounded-xl bg-[#F8F7FF] p-3 text-xs font-semibold text-[#465575]">
-                <input
-                  type="checkbox"
-                  checked={form.isFeatured}
-                  onChange={(event) =>
-                    update(
-                      "isFeatured",
-                      event.target.checked,
-                    )
-                  }
-                  className="accent-[#6D5DF6]"
-                />
-                <Sparkles className="size-4 text-[#6D5DF6]" />
-                Featured Product
-              </label>
-
-              <button
-                type="submit"
-                disabled={
-                  saving ||
-                  (editing ? !canUpdate : !canCreate)
-                }
-                className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#6D5DF6] px-4 text-xs font-bold text-white hover:bg-[#5847E4] disabled:opacity-50"
-              >
-                {saving ? (
-                  <LoaderCircle className="size-4 animate-spin" />
-                ) : editing ? (
-                  <Save className="size-4" />
-                ) : (
-                  <Check className="size-4" />
-                )}
-
-                {saving
-                  ? "Saving..."
-                  : editing
-                    ? "Update Product"
-                    : "Create Product"}
-              </button>
-
-              <Link
-                href="/admin/products"
-                className="mt-3 block rounded-xl border border-[#E5E9F2] px-4 py-3 text-center text-xs font-semibold text-[#65738E]"
-              >
-                Cancel
-              </Link>
-            </section>
-          </aside>
+      {notice && (
+        <div
+          role="status"
+          className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800"
+        >
+          {notice}
         </div>
-      </form>
+      )}
+
+      {!relationsReady && productId && (
+        <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800">
+          Product media or relations could not be loaded.
+          Saving is disabled to protect existing data.
+        </div>
+      )}
+
+      <ProductEditorLayout
+        editing={editing}
+        name={form.name}
+        tab={tab}
+        onTabChange={setTab}
+        variable={form.type === "variable"}
+        generalContent={nameContent}
+        descriptionContent={descriptionContent}
+        shortDescriptionContent={shortDescriptionContent}
+        tabContent={tabContent}
+        sidebar={sidebar}
+      />
     </div>
   );
 }

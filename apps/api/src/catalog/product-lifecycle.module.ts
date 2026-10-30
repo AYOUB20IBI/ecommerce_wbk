@@ -1,4 +1,3 @@
-
 import 'dotenv/config';
 
 import {
@@ -15,6 +14,7 @@ import { SecurityModule } from '../security/security.module';
 
 import { ProductLifecycleController } from './product-lifecycle.controller';
 import { ProductLifecycleService } from './product-lifecycle.service';
+import { ProductBulkTrashController } from './product-bulk-trash.controller';
 
 export const PRODUCT_LIFECYCLE_POOL =
   'PRODUCT_LIFECYCLE_POOL';
@@ -23,9 +23,7 @@ function createProductLifecyclePool(): Pool {
   const url = process.env.DATABASE_URL;
 
   if (!url) {
-    throw new Error(
-      'DATABASE_URL is missing.',
-    );
+    throw new Error('DATABASE_URL is missing.');
   }
 
   return new Pool({
@@ -58,6 +56,7 @@ class ProductLifecyclePoolCleanup
 
   controllers: [
     ProductLifecycleController,
+    ProductBulkTrashController,
   ],
 
   providers: [
@@ -71,6 +70,7 @@ class ProductLifecyclePoolCleanup
 
   exports: [
     ProductLifecycleService,
+    PRODUCT_LIFECYCLE_POOL,
   ],
 })
 export class ProductLifecycleModule {}

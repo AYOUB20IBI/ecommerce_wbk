@@ -1,5 +1,7 @@
-
-import { NextRequest, NextResponse } from "next/server";
+import {
+  NextRequest,
+  NextResponse,
+} from "next/server";
 
 import {
   getAdminCookieName,
@@ -8,26 +10,73 @@ import {
 } from "@/lib/auth/admin-server";
 
 const ALLOWED_PARAMS = new Set([
-  "page", "limit", "search", "status", "type",
-  "categoryId", "brandId", "tagId", "attributeId",
-  "valueId", "minPrice", "maxPrice", "stockStatus",
-  "isFeatured", "trash", "sortBy", "sortOrder",
+  "page",
+  "limit",
+  "search",
+  "status",
+  "type",
+  "categoryId",
+  "brandId",
+  "tagId",
+  "attributeId",
+  "valueId",
+  "minPrice",
+  "maxPrice",
+  "stockStatus",
+  "isFeatured",
+  "trash",
+  "sortBy",
+  "sortOrder",
 ]);
+
+type ProductItem = {
+  id: string;
+  [key: string]: unknown;
+};
+
+type TaxonomyItem = {
+  id: string;
+  name: string;
+};
+
+type ProductTaxonomies = {
+  categories: TaxonomyItem[];
+  tags: TaxonomyItem[];
+};
+
+type ListData = {
+  items: ProductItem[];
+  pagination: unknown;
+};
+
+type ListResult = {
+  success: boolean;
+  message?: string;
+  data?: ListData;
+};
+
+type TaxonomyResult = {
+  success: boolean;
+  data?: Record<string, ProductTaxonomies>;
+};
+
+const NO_STORE = {
+  "Cache-Control": "private, no-store",
+};
 
 function failure(status: number, message: string) {
   return NextResponse.json(
     { success: false, message },
-    {
-      status,
-      headers: { "Cache-Control": "no-store" },
-    },
+    { status, headers: NO_STORE },
   );
 }
 
-function trustedOrigin() {
+function getOrigin(): string {
   const raw = process.env.ADMIN_APP_ORIGIN;
 
-  if (!raw) throw new Error("Missing ADMIN_APP_ORIGIN");
+  if (!raw) {
+    throw new Error("ADMIN_APP_ORIGIN is missing.");
+  }
 
   const url = new URL(raw);
 
@@ -38,83 +87,67 @@ function trustedOrigin() {
     url.username ||
     url.password
   ) {
-    throw new Error("Invalid ADMIN_APP_ORIGIN");
+    throw new Error("Invalid ADMIN_APP_ORIGIN.");
   }
 
   const local =
     url.protocol === "http:" &&
-    ["localhost", "127.0.0.1"].includes(url.hostname);
+    ["localhost", "127.0.0.1"].includes(
+      url.hostname,
+    );
 
   if (url.protocol !== "https:" && !local) {
-    throw new Error("HTTPS required.");
+    throw new Error("HTTPS required outside localhost.");
   }
 
   return url.origin;
 }
 
-async function session() {
-  const token = await getAdminSessionToken();
-
-  if (!token) return null;
-
+function getCookie(token: string) {
   return `${getAdminCookieName()}=${token}`;
 }
 
-async function forward(
-  url: string,
-  cookie: string,
-  method: "GET" | "POST",
-  origin?: string,
-  csrfToken?: string,
-  body?: string,
-) {
-  const upstream = await fetch(url, {
-    method,
-    headers: {
-      Cookie: cookie,
-      Accept: "application/json",
-      ...(method === "POST"
-        ? {
-            Origin: origin!,
-            "X-CSRF-Token": csrfToken!,
-            "Content-Type": "application/json",
-          }
-        : {}),
-    },
-    body,
-    cache: "no-store",
-    redirect: "manual",
-    signal: AbortSignal.timeout(20000),
-  });
-
-  if (upstream.status >= 300 && upstream.status < 400) {
-    return failure(502, "Unexpected API redirect.");
+function validList(value: unknown): value is ListResult {
+  if (!value || typeof value !== "object") {
+    return false;
   }
 
-  const raw = await upstream.text();
+  const body = value as Partial<ListResult>;
 
-  if (raw.length > 2000000) {
-    return failure(502, "API response too large.");
+  return (
+    body.success === true &&
+    Boolean(body.data) &&
+    Array.isArray(body.data?.items) &&
+    Boolean(body.data?.pagination) &&
+    body.data!.items.every(
+      (item) =>
+        item !== null &&
+        typeof item === "object" &&
+        typeof item.id === "string",
+    )
+  );
+}
+
+function validTaxonomies(
+  value: unknown,
+): value is TaxonomyResult {
+  if (!value || typeof value !== "object") {
+    return false;
   }
 
-  let result: unknown;
+  const data = value as Partial<TaxonomyResult>;
 
-  try {
-    result = JSON.parse(raw);
-  } catch {
-    return failure(502, "Invalid API response.");
-  }
-
-  return NextResponse.json(result, {
-    status: upstream.status,
-    headers: { "Cache-Control": "no-store" },
-  });
+  return (
+    data.success === true &&
+    Boolean(data.data) &&
+    typeof data.data === "object"
+  );
 }
 
 export async function GET(request: NextRequest) {
-  const cookie = await session();
+  const token = await getAdminSessionToken();
 
-  if (!cookie) {
+  if (!token) {
     return failure(401, "Authentication required.");
   }
 
@@ -129,20 +162,133 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const base = getNestApiUrl();
+    const cookie = getCookie(token);
+
     const endpoint = new URL(
       "/api/v1/admin/products",
-      getNestApiUrl(),
+      base,
     );
 
     endpoint.search = query.toString();
 
-    return await forward(
-      endpoint.toString(),
-      cookie,
-      "GET",
+    const upstream = await fetch(endpoint, {
+      headers: {
+        Cookie: cookie,
+        Accept: "application/json",
+      },
+      cache: "no-store",
+      redirect: "manual",
+      signal: AbortSignal.timeout(12000),
+    });
+
+    if (upstream.status === 401) {
+      return failure(401, "Session expired.");
+    }
+
+    if (upstream.status === 403) {
+      return failure(403, "Permission denied.");
+    }
+
+    if (upstream.status >= 300 && upstream.status < 400) {
+      return failure(502, "Unexpected API redirect.");
+    }
+
+    const raw = await upstream.text();
+
+    if (raw.length > 2_000_000) {
+      return failure(502, "Products response too large.");
+    }
+
+    let result: unknown;
+
+    try {
+      result = JSON.parse(raw);
+    } catch {
+      return failure(502, "Invalid products response.");
+    }
+
+    if (!upstream.ok) {
+      return NextResponse.json(result, {
+        status: upstream.status,
+        headers: NO_STORE,
+      });
+    }
+
+    if (!validList(result)) {
+      return failure(502, "Invalid products data.");
+    }
+
+    const ids = result.data!.items.map(
+      (product) => product.id,
     );
+
+    if (ids.length > 0) {
+      const taxonomyUrl = new URL(
+        "/api/v1/admin/products/list-taxonomies",
+        base,
+      );
+
+      taxonomyUrl.searchParams.set(
+        "ids",
+        ids.join(","),
+      );
+
+      const taxonomyResponse = await fetch(taxonomyUrl, {
+        headers: {
+          Cookie: cookie,
+          Accept: "application/json",
+        },
+        cache: "no-store",
+        redirect: "manual",
+        signal: AbortSignal.timeout(8000),
+      });
+
+      if (!taxonomyResponse.ok) {
+        return failure(
+          taxonomyResponse.status === 401 ? 401 : 502,
+          "Product taxonomy data unavailable.",
+        );
+      }
+
+      const taxonomyResult: unknown =
+        await taxonomyResponse.json();
+
+      if (!validTaxonomies(taxonomyResult)) {
+        return failure(502, "Invalid taxonomy data.");
+      }
+
+      const taxonomies = taxonomyResult.data!;
+
+      result.data!.items = result.data!.items.map(
+        (product) => {
+          const found = taxonomies[product.id];
+
+          if (
+            !found ||
+            !Array.isArray(found.categories) ||
+            !Array.isArray(found.tags)
+          ) {
+            throw new Error("Incomplete taxonomy data.");
+          }
+
+          return {
+            ...product,
+            categories: found.categories,
+            tags: found.tags,
+          };
+        },
+      );
+    }
+
+    return NextResponse.json(result, {
+      headers: NO_STORE,
+    });
   } catch {
-    return failure(503, "Product service unavailable.");
+    return failure(
+      503,
+      "Products service temporarily unavailable.",
+    );
   }
 }
 
@@ -150,26 +296,28 @@ export async function POST(request: NextRequest) {
   let origin: string;
 
   try {
-    origin = trustedOrigin();
+    origin = getOrigin();
   } catch {
-    return failure(500, "Server configuration error.");
+    return failure(500, "Admin origin not configured.");
   }
 
-  const fetchSite = request.headers.get("sec-fetch-site");
+  const fetchSite =
+    request.headers.get("sec-fetch-site");
 
   if (
     request.nextUrl.origin !== origin ||
     request.headers.get("origin") !== origin ||
-    (fetchSite !== null &&
+    (
+      fetchSite !== null &&
       fetchSite !== "same-origin" &&
-      fetchSite !== "none")
+      fetchSite !== "none"
+    )
   ) {
     return failure(403, "Origin not allowed.");
   }
 
   if (
-    request.headers
-      .get("content-type")
+    request.headers.get("content-type")
       ?.split(";")[0]
       ?.trim()
       .toLowerCase() !== "application/json"
@@ -177,45 +325,42 @@ export async function POST(request: NextRequest) {
     return failure(415, "JSON required.");
   }
 
-  const cookie = await session();
+  const token = await getAdminSessionToken();
 
-  if (!cookie) {
+  if (!token) {
     return failure(401, "Authentication required.");
   }
 
-  const declaredLength = Number(
-    request.headers.get("content-length") ?? "0",
-  );
+  const raw = await request.text();
 
-  if (declaredLength > 1000000) {
+  if (
+    new TextEncoder().encode(raw).length > 1_000_000
+  ) {
     return failure(413, "Payload too large.");
   }
 
-  const body = await request.text();
-
-  if (Buffer.byteLength(body, "utf8") > 1000000) {
-    return failure(413, "Payload too large.");
-  }
+  let body: unknown;
 
   try {
-    const data: unknown = JSON.parse(body);
-
-    if (
-      data === null ||
-      typeof data !== "object" ||
-      Array.isArray(data)
-    ) {
-      return failure(400, "Invalid product payload.");
-    }
+    body = JSON.parse(raw);
   } catch {
     return failure(400, "Invalid JSON.");
   }
 
+  if (
+    !body ||
+    typeof body !== "object" ||
+    Array.isArray(body)
+  ) {
+    return failure(400, "Invalid product payload.");
+  }
+
   try {
     const base = getNestApiUrl();
+    const cookie = getCookie(token);
 
-    const csrf = await fetch(
-      `${base}/api/v1/admin/auth/csrf`,
+    const csrfResponse = await fetch(
+      new URL("/api/v1/admin/auth/csrf", base),
       {
         headers: {
           Cookie: cookie,
@@ -227,38 +372,71 @@ export async function POST(request: NextRequest) {
       },
     );
 
-    if (csrf.status === 401) {
-      return failure(401, "Session expired.");
+    if (!csrfResponse.ok) {
+      return failure(
+        csrfResponse.status === 401 ? 401 : 502,
+        "CSRF verification unavailable.",
+      );
     }
 
-    if (!csrf.ok) {
-      return failure(502, "CSRF service unavailable.");
-    }
-
-    const result: unknown = await csrf.json();
+    const csrf: unknown = await csrfResponse.json();
 
     if (
-      !result ||
-      typeof result !== "object" ||
-      !("data" in result) ||
-      !result.data ||
-      typeof result.data !== "object" ||
-      !("csrfToken" in result.data) ||
-      typeof result.data.csrfToken !== "string" ||
-      !result.data.csrfToken
+      !csrf ||
+      typeof csrf !== "object" ||
+      !("data" in csrf) ||
+      !csrf.data ||
+      typeof csrf.data !== "object" ||
+      !("csrfToken" in csrf.data) ||
+      typeof csrf.data.csrfToken !== "string"
     ) {
       return failure(502, "Invalid CSRF response.");
     }
 
-    return await forward(
-      `${base}/api/v1/admin/products`,
-      cookie,
-      "POST",
-      origin,
-      result.data.csrfToken,
-      body,
+    const upstream = await fetch(
+      new URL("/api/v1/admin/products", base),
+      {
+        method: "POST",
+        headers: {
+          Cookie: cookie,
+          Origin: origin,
+          "X-CSRF-Token": csrf.data.csrfToken,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: raw,
+        cache: "no-store",
+        redirect: "manual",
+        signal: AbortSignal.timeout(20000),
+      },
     );
+
+    if (upstream.status >= 300 && upstream.status < 400) {
+      return failure(502, "Unexpected API redirect.");
+    }
+
+    const responseText = await upstream.text();
+
+    if (responseText.length > 2_000_000) {
+      return failure(502, "API response too large.");
+    }
+
+    let result: unknown;
+
+    try {
+      result = JSON.parse(responseText);
+    } catch {
+      return failure(502, "Invalid API response.");
+    }
+
+    return NextResponse.json(result, {
+      status: upstream.status,
+      headers: NO_STORE,
+    });
   } catch {
-    return failure(503, "Product service unavailable.");
+    return failure(
+      503,
+      "Products service temporarily unavailable.",
+    );
   }
 }

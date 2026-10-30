@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql   } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import sharp from 'sharp';
 
@@ -21,6 +21,7 @@ import {
 } from '../database/schema/catalog-media.schema';
 
 
+import { adminUsers } from '../database/schema/auth.schema';
 
 import type {
   ExternalMediaInput,
@@ -544,6 +545,7 @@ export class MediaService {
   // =====================================
 
   
+
   async activity(id: string) {
     const [item] = await this.db
       .select({ id: media.id })
@@ -554,25 +556,53 @@ export class MediaService {
     if (!item) {
       throw new NotFoundException({
         success: false,
-        message: 'Image introuvable.',
+        message: 'Media not found.',
       });
     }
 
-    return this.db
+    const rows = await this.db
       .select({
         id: mediaActivity.id,
         action: mediaActivity.action,
         actorId: mediaActivity.actorId,
+        actorFirstName: adminUsers.firstName,
+        actorLastName: adminUsers.lastName,
         changes: mediaActivity.changes,
         createdAt: mediaActivity.createdAt,
       })
       .from(mediaActivity)
+      .leftJoin(
+        adminUsers,
+        eq(mediaActivity.actorId, adminUsers.id),
+      )
       .where(eq(mediaActivity.mediaId, id))
       .orderBy(
         desc(mediaActivity.createdAt),
         desc(mediaActivity.id),
       )
       .limit(100);
+
+    return rows.map((row) => {
+      const fullName = [
+        row.actorFirstName,
+        row.actorLastName,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+
+      return {
+        id: row.id,
+        action: row.action,
+        actorId: row.actorId,
+        actorName: row.actorId
+          ? fullName || 'Admin user'
+          : 'System',
+        changes: row.changes,
+        createdAt: row.createdAt,
+      };
+    });
   }
+
 
 }

@@ -8,10 +8,13 @@ import { usePathname } from "next/navigation";
 import {
   ChevronDown,
   ExternalLink,
+  Images,
   LayoutGrid,
   Package,
   PanelLeftClose,
   PanelLeftOpen,
+  PlusCircle,
+  Settings2,
   ShieldCheck,
   ShoppingBag,
   UserCog,
@@ -19,18 +22,10 @@ import {
   X,
 } from "lucide-react";
 
-import type {
-  AdminUser,
-} from "@/lib/auth/admin-server";
+import type { AdminUser } from "@/lib/auth/admin-server";
+import type { AdminAccess } from "@/features/admin/auth/types/admin-access";
 
-import type {
-  AdminAccess,
-} from "@/features/admin/auth/types/admin-access";
-
-import {
-  LogoutButton,
-} from "@/features/admin/auth/components/logout-button";
-
+import { LogoutButton } from "@/features/admin/auth/components/logout-button";
 import { AdminProfile } from "./admin-profile";
 
 type Props = {
@@ -42,6 +37,20 @@ type Props = {
   onClose?: () => void;
   onNavigate?: () => void;
 };
+
+function hasAdminRole(roles: string[]): boolean {
+  return roles.some((role) => {
+    const normalized = role
+      .trim()
+      .toLowerCase()
+      .replace(/[_-]+/g, " ");
+
+    return (
+      normalized === "admin" ||
+      normalized === "super admin"
+    );
+  });
+}
 
 export function AdminSidebar({
   admin,
@@ -56,19 +65,22 @@ export function AdminSidebar({
   const compact = collapsed && !mobile;
 
   const [catalogOpen, setCatalogOpen] = useState(true);
-
-  const [
-    administrationOpen,
-    setAdministrationOpen,
-  ] = useState(true);
-
+  const [mediaOpen, setMediaOpen] = useState(true);
+  const [administrationOpen, setAdministrationOpen] =
+    useState(true);
   const [profileOpen, setProfileOpen] = useState(false);
 
-  const canManageAdmins =
-    access.permissions.includes("roles.manage");
+  const has = (permission: string) =>
+    access.permissions.includes(permission);
 
-  const canViewProducts =
-    access.permissions.includes("products.read");
+  const canManageAdmins = has("roles.manage");
+  const canViewProducts = has("products.read");
+  const canViewMedia = has("media.read");
+  const canCreateMedia = has("media.create");
+
+  // Media Settings is strictly Admin / Super Admin only.
+  // Having media.update or media.create is not enough.
+  const canManageMediaSettings = hasAdminRole(access.roles);
 
   function navClass(active: boolean) {
     return [
@@ -100,7 +112,6 @@ export function AdminSidebar({
         className="mb-1 flex min-h-9 w-full items-center justify-between rounded-lg px-2 text-[11px] font-bold uppercase tracking-wider text-[#8292B1] hover:bg-[#F8F9FD]"
       >
         {title}
-
         <ChevronDown
           className={`size-3.5 transition-transform ${
             open ? "" : "-rotate-90"
@@ -140,7 +151,6 @@ export function AdminSidebar({
             <p className="truncate text-xs font-bold text-[#172444]">
               Commerce Engine
             </p>
-
             <p className="mt-1 text-[10px] text-[#8A97B3]">
               Store Admin
             </p>
@@ -213,17 +223,14 @@ export function AdminSidebar({
             {sectionHeader(
               "Catalog",
               catalogOpen,
-              () =>
-                setCatalogOpen((value) => !value),
+              () => setCatalogOpen((value) => !value),
             )}
 
             {(compact || catalogOpen) && (
               <Link
                 href="/admin/products"
                 onClick={onNavigate}
-                title={
-                  compact ? "Products" : undefined
-                }
+                title={compact ? "Products" : undefined}
                 aria-current={
                   pathname.startsWith("/admin/products")
                     ? "page"
@@ -240,15 +247,104 @@ export function AdminSidebar({
           </div>
         )}
 
+        {(canViewMedia ||
+          canCreateMedia ||
+          canManageMediaSettings) && (
+          <div className="mt-5">
+            {sectionHeader(
+              "Media",
+              mediaOpen,
+              () => setMediaOpen((value) => !value),
+            )}
+
+            {(compact || mediaOpen) && (
+              <div className="space-y-1">
+                {canViewMedia && (
+                  <Link
+                    href="/admin/media"
+                    onClick={onNavigate}
+                    title={
+                      compact
+                        ? "Media Library"
+                        : undefined
+                    }
+                    aria-current={
+                      pathname === "/admin/media"
+                        ? "page"
+                        : undefined
+                    }
+                    className={navClass(
+                      pathname === "/admin/media",
+                    )}
+                  >
+                    <Images className="size-[18px] shrink-0" />
+                    {!compact && (
+                      <span>Media Library</span>
+                    )}
+                  </Link>
+                )}
+
+                {canCreateMedia && (
+                  <Link
+                    href="/admin/media/new"
+                    onClick={onNavigate}
+                    title={
+                      compact
+                        ? "Add New Media"
+                        : undefined
+                    }
+                    aria-current={
+                      pathname === "/admin/media/new"
+                        ? "page"
+                        : undefined
+                    }
+                    className={navClass(
+                      pathname === "/admin/media/new",
+                    )}
+                  >
+                    <PlusCircle className="size-[18px] shrink-0" />
+                    {!compact && (
+                      <span>Add New Media</span>
+                    )}
+                  </Link>
+                )}
+
+                {canManageMediaSettings && (
+                  <Link
+                    href="/admin/media/settings"
+                    onClick={onNavigate}
+                    title={
+                      compact
+                        ? "Media Settings"
+                        : undefined
+                    }
+                    aria-current={
+                      pathname === "/admin/media/settings"
+                        ? "page"
+                        : undefined
+                    }
+                    className={navClass(
+                      pathname === "/admin/media/settings",
+                    )}
+                  >
+                    <Settings2 className="size-[18px] shrink-0" />
+                    {!compact && (
+                      <span>Media Settings</span>
+                    )}
+                  </Link>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {canManageAdmins && (
           <div className="mt-5">
             {sectionHeader(
               "Administration",
               administrationOpen,
               () =>
-                setAdministrationOpen(
-                  (value) => !value,
-                ),
+                setAdministrationOpen((value) => !value),
             )}
 
             {(compact || administrationOpen) && (
@@ -257,9 +353,7 @@ export function AdminSidebar({
                   href="/admin/users"
                   onClick={onNavigate}
                   title={
-                    compact
-                      ? "Admin Users"
-                      : undefined
+                    compact ? "Admin Users" : undefined
                   }
                   aria-current={
                     pathname.startsWith("/admin/users")
@@ -307,9 +401,7 @@ export function AdminSidebar({
           type="button"
           aria-expanded={profileOpen}
           aria-label={
-            compact
-              ? "Admin menu"
-              : undefined
+            compact ? "Admin menu" : undefined
           }
           onClick={() =>
             setProfileOpen((value) => !value)
@@ -332,9 +424,7 @@ export function AdminSidebar({
                 setProfileOpen(false);
               }}
               title={
-                compact
-                  ? "My Profile"
-                  : undefined
+                compact ? "My Profile" : undefined
               }
               aria-current={
                 pathname === "/admin/profile"

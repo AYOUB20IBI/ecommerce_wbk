@@ -11,12 +11,18 @@ import {
 
 import { LocalStorageService } from './local-storage.service';
 import { S3StorageService } from './s3-storage.service';
+import { LocalPrivateMediaStorageService } from './local-private-media-storage.service';
+
+const PRIVATE_DOCUMENT_KEY =
+  /^\d{4}\/(0[1-9]|1[0-2])\/[0-9a-f-]{36}\.(pdf|txt|csv|xls|xlsx|zip|mp4)$/i;
 
 @Injectable()
 export class StorageManagerService {
   constructor(
     private readonly local: LocalStorageService,
     private readonly s3: S3StorageService,
+    private readonly privateStorage:
+      LocalPrivateMediaStorageService,
   ) {}
 
   currentProvider(): StorageProvider {
@@ -26,7 +32,7 @@ export class StorageManagerService {
     if (driver !== 'local' && driver !== 's3') {
       throw new ServiceUnavailableException({
         success: false,
-        message: 'Configuration du stockage invalide.',
+        message: 'Invalid media storage configuration.',
       });
     }
 
@@ -58,6 +64,19 @@ export class StorageManagerService {
     provider: StorageProvider,
     key: string,
   ): Promise<void> {
+    if (PRIVATE_DOCUMENT_KEY.test(key)) {
+      if (provider !== 'local') {
+        throw new ServiceUnavailableException({
+          success: false,
+          message:
+            'Private document storage provider mismatch.',
+        });
+      }
+
+      await this.privateStorage.delete(key);
+      return;
+    }
+
     await this.adapter(provider).delete(key);
   }
 
@@ -65,6 +84,10 @@ export class StorageManagerService {
     provider: StorageProvider,
     key: string,
   ): string | null {
+    if (PRIVATE_DOCUMENT_KEY.test(key)) {
+      return null;
+    }
+
     return this.adapter(provider).getPublicUrl(key);
   }
 }

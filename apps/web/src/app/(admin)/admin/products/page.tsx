@@ -5,10 +5,21 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { ShieldAlert } from "lucide-react";
 
-import { getCurrentAdmin } from "@/lib/auth/admin-server";
-import { getCurrentAdminAccess } from "@/lib/auth/admin-access-server";
-import { AdminShell } from "@/components/admin/layout/admin-shell";
-import { ProductsManager } from "@/features/admin/products/components/products-manager";
+import {
+  getCurrentAdmin,
+} from "@/lib/auth/admin-server";
+
+import {
+  getCurrentAdminAccess,
+} from "@/lib/auth/admin-access-server";
+
+import {
+  AdminShell,
+} from "@/components/admin/layout/admin-shell";
+
+import {
+  ProductsManager,
+} from "@/features/admin/products/components/products-manager";
 
 export const metadata: Metadata = {
   title: "Products | Commerce Engine",
@@ -20,7 +31,10 @@ export const metadata: Metadata = {
 
 function Loading() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#F8F9FC]">
+    <div
+      role="status"
+      className="flex min-h-screen items-center justify-center bg-[#F8F9FC]"
+    >
       <div className="size-10 animate-spin rounded-full border-4 border-[#E9E5FF] border-t-[#6D5DF6]" />
     </div>
   );
@@ -35,7 +49,10 @@ async function Content() {
 
   const access = await getCurrentAdminAccess();
 
-  if (!access || access.adminId !== admin.id) {
+  if (
+    !access ||
+    access.adminId !== admin.id
+  ) {
     redirect("/admin/login");
   }
 
@@ -43,7 +60,10 @@ async function Content() {
     access.permissions.includes(permission);
 
   return (
-    <AdminShell admin={admin} access={access}>
+    <AdminShell
+      admin={admin}
+      access={access}
+    >
       <main className="mx-auto w-full max-w-[1700px] px-3 py-6 sm:px-5 lg:px-7">
         {has("products.read") ? (
           <ProductsManager
@@ -51,17 +71,19 @@ async function Content() {
             canUpdate={has("products.update")}
             canDelete={has("products.delete")}
             canPurge={has("products.purge")}
+            canViewAdminDetails={has("roles.manage")}
           />
         ) : (
-          <div className="flex min-h-[70vh] flex-col items-center justify-center text-center">
+          <div className="flex min-h-[70vh] flex-col items-center justify-center px-4 text-center">
             <ShieldAlert className="size-12 text-red-500" />
 
             <h1 className="mt-4 text-xl font-bold text-[#172444]">
               Access Denied
             </h1>
 
-            <p className="mt-2 text-sm text-[#8290AC]">
-              products.read permission required.
+            <p className="mt-2 max-w-md text-sm text-[#8290AC]">
+              You need products.read permission
+              to view the product catalog.
             </p>
 
             <Link

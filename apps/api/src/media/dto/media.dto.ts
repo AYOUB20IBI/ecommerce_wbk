@@ -1,37 +1,69 @@
 
-import { z } from 'zod';
+import { z } from "zod";
 
 const externalUrlSchema = z
-  .url('URL invalide.')
-  .max(2048, 'URL trop longue.')
+  .url("Invalid URL.")
+  .max(2048, "URL is too long.")
   .refine((value) => {
     try {
       const url = new URL(value);
       const host = url.hostname.toLowerCase();
 
-      return (
-        url.protocol === 'https:' &&
-        url.username === '' &&
-        url.password === '' &&
-        url.hash === '' &&
-        url.port === '' &&
-        host.includes('.') &&
-        host !== 'localhost' &&
-        !host.endsWith('.localhost') &&
-        !host.endsWith('.local') &&
-        !host.endsWith('.internal') &&
-        !host.includes(':') &&
-        !/^\d+\.\d+\.\d+\.\d+$/.test(host)
-      );
+      if (
+        !["http:", "https:"].includes(url.protocol) ||
+        url.username !== "" ||
+        url.password !== "" ||
+        url.hash !== "" ||
+        url.port !== ""
+      ) {
+        return false;
+      }
+
+      if (
+        !host.includes(".") ||
+        host === "localhost" ||
+        host.endsWith(".localhost") ||
+        host.endsWith(".local") ||
+        host.endsWith(".internal") ||
+        host.endsWith(".test") ||
+        host.endsWith(".invalid") ||
+        host.endsWith(".example") ||
+        host.endsWith(".onion") ||
+        host.endsWith(".arpa") ||
+        host.includes(":")
+      ) {
+        return false;
+      }
+
+      // Do not accept IP literals as external media hosts.
+      if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+        return false;
+      }
+
+      // Reject numeric and single-label host variations.
+      if (
+        host.split(".").some(
+          (label) =>
+            label.length === 0 ||
+            !/^[a-z0-9-]+$/.test(label) ||
+            label.startsWith("-") ||
+            label.endsWith("-"),
+        )
+      ) {
+        return false;
+      }
+
+      return true;
     } catch {
       return false;
     }
-  }, 'Une URL HTTPS publique est requise.');
+  }, "A valid public HTTP or HTTPS URL is required.");
 
 export const externalMediaSchema = z.strictObject({
   url: externalUrlSchema,
 
-  altText: z.string()
+  altText: z
+    .string()
     .trim()
     .max(255)
     .nullable()
@@ -39,20 +71,19 @@ export const externalMediaSchema = z.strictObject({
 });
 
 export const updateMediaSchema = z.strictObject({
-  altText: z.string()
-    .trim()
-    .max(255)
-    .nullable(),
+  altText: z.string().trim().max(255).nullable(),
 });
 
 export const mediaListSchema = z.strictObject({
-  page: z.coerce.number()
+  page: z.coerce
+    .number()
     .int()
     .min(1)
     .max(100000)
     .default(1),
 
-  limit: z.coerce.number()
+  limit: z.coerce
+    .number()
     .int()
     .min(1)
     .max(100)

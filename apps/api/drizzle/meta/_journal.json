@@ -127,6 +127,27 @@
       "when": 1792516371890,
       "tag": "0017_cart_cleanup",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793279844384,
+      "tag": "0018_thin_kat_farrell",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793280466968,
+      "tag": "0019_sour_puck",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793283298918,
+      "tag": "0020_cloudy_vulcan",
+      "breakpoints": true
     }
   ]
 }

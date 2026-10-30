@@ -1,0 +1,363 @@
+
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+import {
+  ChevronDown,
+  ExternalLink,
+  Images,
+  LayoutGrid,
+  Package,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PlusCircle,
+  ShieldCheck,
+  ShoppingBag,
+  UserCog,
+  UserRound,
+  X,
+} from "lucide-react";
+
+import type { AdminUser } from "@/lib/auth/admin-server";
+import type { AdminAccess } from "@/features/admin/auth/types/admin-access";
+
+import { LogoutButton } from "@/features/admin/auth/components/logout-button";
+import { AdminProfile } from "./admin-profile";
+
+type Props = {
+  admin: AdminUser;
+  access: AdminAccess;
+  collapsed?: boolean;
+  mobile?: boolean;
+  onToggleCollapse?: () => void;
+  onClose?: () => void;
+  onNavigate?: () => void;
+};
+
+export function AdminSidebar({
+  admin,
+  access,
+  collapsed = false,
+  mobile = false,
+  onToggleCollapse,
+  onClose,
+  onNavigate,
+}: Props) {
+  const pathname = usePathname();
+  const compact = collapsed && !mobile;
+
+  const [catalogOpen, setCatalogOpen] = useState(true);
+  const [mediaOpen, setMediaOpen] = useState(true);
+  const [administrationOpen, setAdministrationOpen] =
+    useState(true);
+  const [profileOpen, setProfileOpen] = useState(false);
+
+  const has = (permission: string) =>
+    access.permissions.includes(permission);
+
+  const canManageAdmins = has("roles.manage");
+  const canViewProducts = has("products.read");
+  const canViewMedia = has("media.read");
+  const canCreateMedia = has("media.create");
+
+  function navClass(active: boolean) {
+    return [
+      "flex min-h-10 w-full items-center rounded-xl",
+      "text-left text-xs font-medium transition-colors",
+      compact ? "justify-center px-2" : "gap-3 px-3.5",
+      active
+        ? "bg-[#EEEBFF] font-semibold text-[#6554F5]"
+        : "text-[#53617E] hover:bg-[#F7F6FF] hover:text-[#6554F5]",
+    ].join(" ");
+  }
+
+  function sectionHeader(
+    title: string,
+    open: boolean,
+    toggle: () => void,
+  ) {
+    if (compact) {
+      return <div className="mx-auto my-3 h-px w-8 bg-[#E8EAF3]" />;
+    }
+
+    return (
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        className="mb-1 flex min-h-9 w-full items-center justify-between rounded-lg px-2 text-[11px] font-bold uppercase tracking-wider text-[#8292B1] hover:bg-[#F8F9FD]"
+      >
+        {title}
+        <ChevronDown
+          className={`size-3.5 transition-transform ${
+            open ? "" : "-rotate-90"
+          }`}
+        />
+      </button>
+    );
+  }
+
+  return (
+    <aside
+      className={[
+        "flex h-full min-h-0 max-w-full flex-col",
+        "border-r border-[#E9EDF6] bg-white",
+        "transition-[width] duration-300",
+        mobile
+          ? "w-full"
+          : compact
+            ? "w-[76px]"
+            : "w-[260px]",
+      ].join(" ")}
+    >
+      <div
+        className={[
+          "flex shrink-0 items-center border-b border-[#F1F3F8]",
+          compact
+            ? "min-h-[100px] flex-col justify-center gap-2 px-2"
+            : "h-[76px] gap-2 px-3",
+        ].join(" ")}
+      >
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-[#6D5DF6] text-white">
+          <ShoppingBag className="size-5" />
+        </div>
+
+        {!compact && (
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-bold text-[#172444]">
+              Commerce Engine
+            </p>
+            <p className="mt-1 text-[10px] text-[#8A97B3]">
+              Store Admin
+            </p>
+          </div>
+        )}
+
+        <div className="flex items-center gap-1">
+          <Link
+            href="/"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="View Store"
+            title="View Store"
+            className="flex size-8 items-center justify-center rounded-lg text-[#667797] hover:bg-[#EFEDFF]"
+          >
+            <ExternalLink className="size-4" />
+          </Link>
+
+          {mobile ? (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close navigation"
+              className="flex size-8 items-center justify-center rounded-lg"
+            >
+              <X className="size-4" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              aria-label={
+                collapsed ? "Expand sidebar" : "Collapse sidebar"
+              }
+              className="flex size-8 items-center justify-center rounded-lg text-[#667797] hover:bg-[#EFEDFF]"
+            >
+              {collapsed ? (
+                <PanelLeftOpen className="size-4" />
+              ) : (
+                <PanelLeftClose className="size-4" />
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <nav
+        aria-label="Admin navigation"
+        className={`min-h-0 flex-1 overflow-y-auto pb-5 pt-4 ${
+          compact ? "px-2" : "px-3"
+        }`}
+      >
+        <Link
+          href="/admin"
+          onClick={onNavigate}
+          aria-current={pathname === "/admin" ? "page" : undefined}
+          title={compact ? "Dashboard" : undefined}
+          className={navClass(pathname === "/admin")}
+        >
+          <LayoutGrid className="size-[18px] shrink-0" />
+          {!compact && <span>Dashboard</span>}
+        </Link>
+
+        {canViewProducts && (
+          <div className="mt-5">
+            {sectionHeader(
+              "Catalog",
+              catalogOpen,
+              () => setCatalogOpen((value) => !value),
+            )}
+
+            {(compact || catalogOpen) && (
+              <Link
+                href="/admin/products"
+                onClick={onNavigate}
+                title={compact ? "Products" : undefined}
+                aria-current={
+                  pathname.startsWith("/admin/products")
+                    ? "page"
+                    : undefined
+                }
+                className={navClass(
+                  pathname.startsWith("/admin/products"),
+                )}
+              >
+                <Package className="size-[18px] shrink-0" />
+                {!compact && <span>Products</span>}
+              </Link>
+            )}
+          </div>
+        )}
+
+        {(canViewMedia || canCreateMedia) && (
+          <div className="mt-5">
+            {sectionHeader(
+              "Media",
+              mediaOpen,
+              () => setMediaOpen((value) => !value),
+            )}
+
+            {(compact || mediaOpen) && (
+              <div className="space-y-1">
+                {canViewMedia && (
+                  <Link
+                    href="/admin/media"
+                    onClick={onNavigate}
+                    title={compact ? "Media Library" : undefined}
+                    aria-current={
+                      pathname === "/admin/media"
+                        ? "page"
+                        : undefined
+                    }
+                    className={navClass(pathname === "/admin/media")}
+                  >
+                    <Images className="size-[18px] shrink-0" />
+                    {!compact && <span>Media Library</span>}
+                  </Link>
+                )}
+
+                {canCreateMedia && (
+                  <Link
+                    href="/admin/media/new"
+                    onClick={onNavigate}
+                    title={compact ? "Add New Media" : undefined}
+                    aria-current={
+                      pathname === "/admin/media/new"
+                        ? "page"
+                        : undefined
+                    }
+                    className={navClass(
+                      pathname === "/admin/media/new",
+                    )}
+                  >
+                    <PlusCircle className="size-[18px] shrink-0" />
+                    {!compact && <span>Add New Media</span>}
+                  </Link>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {canManageAdmins && (
+          <div className="mt-5">
+            {sectionHeader(
+              "Administration",
+              administrationOpen,
+              () => setAdministrationOpen((value) => !value),
+            )}
+
+            {(compact || administrationOpen) && (
+              <div className="space-y-1">
+                <Link
+                  href="/admin/users"
+                  onClick={onNavigate}
+                  title={compact ? "Admin Users" : undefined}
+                  aria-current={
+                    pathname.startsWith("/admin/users")
+                      ? "page"
+                      : undefined
+                  }
+                  className={navClass(
+                    pathname.startsWith("/admin/users"),
+                  )}
+                >
+                  <UserCog className="size-[18px] shrink-0" />
+                  {!compact && <span>Admin Users</span>}
+                </Link>
+
+                <Link
+                  href="/admin/roles"
+                  onClick={onNavigate}
+                  title={compact ? "Roles & Permissions" : undefined}
+                  aria-current={
+                    pathname.startsWith("/admin/roles")
+                      ? "page"
+                      : undefined
+                  }
+                  className={navClass(
+                    pathname.startsWith("/admin/roles"),
+                  )}
+                >
+                  <ShieldCheck className="size-[18px] shrink-0" />
+                  {!compact && <span>Roles & Permissions</span>}
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+      </nav>
+
+      <div className="shrink-0 space-y-2 border-t border-[#EDF0F6] bg-white p-2.5">
+        <button
+          type="button"
+          aria-expanded={profileOpen}
+          aria-label={compact ? "Admin menu" : undefined}
+          onClick={() => setProfileOpen((value) => !value)}
+          className="w-full rounded-xl p-2 text-left hover:bg-[#F8F7FF]"
+        >
+          <AdminProfile admin={admin} compact={compact} />
+        </button>
+
+        {(profileOpen || pathname === "/admin/profile") && (
+          <div className="space-y-1 rounded-lg bg-[#F8F7FF] p-2">
+            <Link
+              href="/admin/profile"
+              onClick={() => {
+                onNavigate?.();
+                setProfileOpen(false);
+              }}
+              title={compact ? "My Profile" : undefined}
+              aria-current={
+                pathname === "/admin/profile"
+                  ? "page"
+                  : undefined
+              }
+              className={navClass(
+                pathname === "/admin/profile",
+              )}
+            >
+              <UserRound className="size-[18px] shrink-0" />
+              {!compact && <span>My Profile</span>}
+            </Link>
+
+            <LogoutButton compact={compact} />
+          </div>
+        )}
+      </div>
+    </aside>
+  );
+}

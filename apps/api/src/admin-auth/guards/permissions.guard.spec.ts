@@ -1,3 +1,4 @@
+﻿import { vi } from 'vitest';
 
 import {
   ExecutionContext,
@@ -13,11 +14,11 @@ describe('PermissionsGuard', () => {
   let guard: PermissionsGuard;
 
   const reflector = {
-    getAllAndOverride: jest.fn(),
+    getAllAndOverride: vi.fn(),
   };
 
   const rbac = {
-    hasAllPermissions: jest.fn(),
+    hasAllPermissions: vi.fn(),
   };
 
   function createContext(
@@ -39,7 +40,7 @@ describe('PermissionsGuard', () => {
   }
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     guard = new PermissionsGuard(
       reflector as unknown as Reflector,
@@ -168,3 +169,4 @@ describe('PermissionsGuard', () => {
     );
   });
 });
+

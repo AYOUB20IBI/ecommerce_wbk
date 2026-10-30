@@ -1,5 +1,6 @@
 
 import { sql } from 'drizzle-orm';
+
 import {
   pgEnum,
   pgTable,
@@ -13,7 +14,6 @@ import {
   index,
   uniqueIndex,
   check,
-  foreignKey,
 } from 'drizzle-orm/pg-core';
 
 import {
@@ -37,12 +37,10 @@ export const storageProviderEnum = pgEnum(
   ['local', 's3'],
 );
 
-
 export const mediaStatusEnum = pgEnum(
   'media_status',
   ['ready', 'deleting', 'deleted'],
 );
-
 
 // =====================================
 // MEDIA LIBRARY
@@ -51,7 +49,9 @@ export const mediaStatusEnum = pgEnum(
 export const media = pgTable(
   'media',
   {
-    id: uuid('id').defaultRandom().primaryKey(),
+    id: uuid('id')
+      .defaultRandom()
+      .primaryKey(),
 
     sourceType: mediaSourceEnum('source_type')
       .notNull(),
@@ -115,38 +115,70 @@ export const media = pgTable(
       ),
 
     index('media_status_created_idx')
-      .on(table.status, table.createdAt),
+      .on(
+        table.status,
+        table.createdAt,
+      ),
 
     index('media_uploaded_by_idx')
       .on(table.uploadedBy),
 
+    // Uploads must contain valid storage metadata.
+    // Images have dimensions; other file types do not
+    // require width or height.
+    //
+    // MIME allowlist and file signature validation
+    // are enforced by MediaService, not this check.
     check(
       'media_source_consistency',
       sql`(
-        ${table.sourceType} = 'upload'
-        AND ${table.storageProvider} IS NOT NULL
-        AND ${table.storageKey} IS NOT NULL
-        AND ${table.externalUrl} IS NULL
-        AND ${table.mimeType} = 'image/webp'
-        AND ${table.fileSize} > 0
-        AND ${table.width} > 0
-        AND ${table.height} > 0
-      ) OR (
-        ${table.sourceType} = 'external'
-        AND ${table.storageProvider} IS NULL
-        AND ${table.storageKey} IS NULL
-        AND ${table.externalUrl} IS NOT NULL
-        AND ${table.mimeType} IS NULL
-        AND ${table.fileSize} IS NULL
-        AND ${table.width} IS NULL
-        AND ${table.height} IS NULL
+        (
+          ${table.sourceType} = 'upload'
+          AND ${table.storageProvider} IS NOT NULL
+          AND ${table.storageKey} IS NOT NULL
+          AND length(${table.storageKey}) > 0
+          AND ${table.externalUrl} IS NULL
+          AND ${table.mimeType} IS NOT NULL
+          AND length(${table.mimeType}) > 0
+          AND ${table.fileSize} IS NOT NULL
+          AND ${table.fileSize} > 0
+          AND (
+            (
+              ${table.width} IS NULL
+              AND ${table.height} IS NULL
+            )
+            OR
+            (
+              ${table.width} > 0
+              AND ${table.height} > 0
+            )
+          )
+        )
+        OR
+        (
+          ${table.sourceType} = 'external'
+          AND ${table.storageProvider} IS NULL
+          AND ${table.storageKey} IS NULL
+          AND ${table.externalUrl} IS NOT NULL
+          AND length(${table.externalUrl}) > 0
+          AND ${table.mimeType} IS NULL
+          AND ${table.fileSize} IS NULL
+          AND ${table.width} IS NULL
+          AND ${table.height} IS NULL
+        )
       )`,
     ),
 
+    // URL protocol is validated again in MediaService.
+    // Localhost/private network restrictions belong
+    // to the application's external URL validator.
     check(
       'media_external_https',
-      sql`${table.externalUrl} IS NULL
-          OR ${table.externalUrl} LIKE 'https://%'`,
+      sql`(
+        ${table.externalUrl} IS NULL
+        OR ${table.externalUrl} LIKE 'https://%'
+        OR ${table.externalUrl} LIKE 'http://%'
+      )`,
     ),
   ],
 );
@@ -158,7 +190,9 @@ export const media = pgTable(
 export const productImages = pgTable(
   'product_images',
   {
-    id: uuid('id').defaultRandom().primaryKey(),
+    id: uuid('id')
+      .defaultRandom()
+      .primaryKey(),
 
     productId: uuid('product_id')
       .notNull()
@@ -223,7 +257,9 @@ export const productImages = pgTable(
 export const mediaActivity = pgTable(
   'media_activity',
   {
-    id: uuid('id').defaultRandom().primaryKey(),
+    id: uuid('id')
+      .defaultRandom()
+      .primaryKey(),
 
     mediaId: uuid('media_id')
       .notNull()
@@ -248,10 +284,14 @@ export const mediaActivity = pgTable(
   },
   (table) => [
     index('media_activity_media_created_idx')
-      .on(table.mediaId, table.createdAt),
+      .on(
+        table.mediaId,
+        table.createdAt,
+      ),
   ],
 );
 
 export type Media = typeof media.$inferSelect;
 export type NewMedia = typeof media.$inferInsert;
-export type ProductImage = typeof productImages.$inferSelect;
+export type ProductImage =
+  typeof productImages.$inferSelect;

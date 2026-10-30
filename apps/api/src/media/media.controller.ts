@@ -9,6 +9,7 @@ import {
   HttpStatus,
   Param,
   Patch,
+  PayloadTooLargeException,
   Post,
   Query,
   Req,
@@ -31,6 +32,7 @@ import {
 } from './dto/media.dto';
 
 import { MediaService } from './media.service';
+import { MediaUploadPolicyService } from './settings/media-upload-policy.service';
 
 function validateId(id: string): string {
   const parsed = mediaIdSchema.safeParse(id);
@@ -38,9 +40,9 @@ function validateId(id: string): string {
   if (!parsed.success) {
     throw new BadRequestException({
       success: false,
-      message: 'Identifiant invalide.',
+      message: 'Invalid media ID.',
       errors: {
-        id: ['UUID invalide.'],
+        id: ['A valid UUID is required.'],
       },
     });
   }
@@ -53,12 +55,21 @@ function validateBody<T>(
     safeParse: (
       value: unknown,
     ) =>
-      | { success: true; data: T }
-      | { success: false; error: {
-          flatten: () => {
-            fieldErrors: Record<string, string[] | undefined>;
+      | {
+          success: true;
+          data: T;
+        }
+      | {
+          success: false;
+          error: {
+            flatten: () => {
+              fieldErrors: Record<
+                string,
+                string[] | undefined
+              >;
+            };
           };
-        } };
+        };
   },
   value: unknown,
 ): T {
@@ -67,7 +78,7 @@ function validateBody<T>(
   if (!result.success) {
     throw new BadRequestException({
       success: false,
-      message: 'Les données fournies sont invalides.',
+      message: 'Invalid request data.',
       errors: result.error.flatten().fieldErrors,
     });
   }
@@ -80,11 +91,13 @@ function validateBody<T>(
 export class MediaController {
   constructor(
     private readonly service: MediaService,
+    private readonly uploadPolicy: MediaUploadPolicyService,
   ) {}
 
-  // -------------------------------------
-  // POST /admin/media/upload
-  // -------------------------------------
+  // =====================================
+  // UPLOAD IMAGE
+  // POST /api/v1/admin/media/upload
+  // =====================================
 
   @Post('upload')
   @UseGuards(CsrfGuard)
@@ -99,7 +112,7 @@ export class MediaController {
     if (!request.isMultipart()) {
       throw new BadRequestException({
         success: false,
-        message: 'multipart/form-data requis.',
+        message: 'multipart/form-data is required.',
       });
     }
 
@@ -115,9 +128,10 @@ export class MediaController {
       ).statusCode;
 
       if (status === 413) {
-        throw new BadRequestException({
+        throw new PayloadTooLargeException({
           success: false,
-          message: 'Le fichier dépasse la taille autorisée.',
+          message:
+            'The upload exceeds the server size limit.',
         });
       }
 
@@ -127,35 +141,68 @@ export class MediaController {
     if (!file || file.fieldname !== 'file') {
       throw new BadRequestException({
         success: false,
-        message: 'Le champ file est obligatoire.',
+        message:
+          'The multipart field "file" is required.',
       });
     }
 
-    const buffer = await file.toBuffer();
+    let buffer: Buffer;
 
-    // Multipart may report a truncated stream.
+    try {
+      buffer = await file.toBuffer();
+    } catch (error) {
+      const status = (
+        error as { statusCode?: number }
+      ).statusCode;
+
+      if (status === 413) {
+        throw new PayloadTooLargeException({
+          success: false,
+          message:
+            'The upload exceeds the server size limit.',
+        });
+      }
+
+      throw error;
+    }
+
     if (file.file.truncated) {
-      throw new BadRequestException({
+      throw new PayloadTooLargeException({
         success: false,
-        message: 'Le fichier dépasse 5 Mo.',
+        message:
+          'The upload exceeds the server size limit.',
       });
     }
+
+    await this.uploadPolicy.validateImageUpload({
+      filename: file.filename,
+      mimetype: file.mimetype,
+      size: buffer.length,
+    });
+
+    // MediaService performs the actual
+    // content-based image verification using Sharp.
+    //
+    // It also converts the image to WebP,
+    // persists its metadata and logs the upload.
+    const result = await this.service.uploadImage(
+      buffer,
+      file.filename,
+      file.mimetype,
+      admin.id,
+    );
 
     return {
       success: true,
-      message: 'Image ajoutée avec succès.',
-      data: await this.service.uploadImage(
-        buffer,
-        file.filename,
-        file.mimetype,
-        admin.id,
-      ),
+      message: 'Image uploaded successfully.',
+      data: result,
     };
   }
 
-  // -------------------------------------
-  // POST /admin/media/external
-  // -------------------------------------
+  // =====================================
+  // EXTERNAL IMAGE
+  // POST /api/v1/admin/media/external
+  // =====================================
 
   @Post('external')
   @UseGuards(CsrfGuard)
@@ -175,19 +222,28 @@ export class MediaController {
       body,
     );
 
+    // Apply the administrator's current
+    // HTTP/HTTPS policy before creating media.
+    await this.uploadPolicy.validateExternalUrl(
+      input.url,
+    );
+
+    const result = await this.service.addExternal(
+      input,
+      admin.id,
+    );
+
     return {
       success: true,
-      message: 'Image externe ajoutée avec succès.',
-      data: await this.service.addExternal(
-        input,
-        admin.id,
-      ),
+      message: 'External media added successfully.',
+      data: result,
     };
   }
 
-  // -------------------------------------
-  // GET /admin/media
-  // -------------------------------------
+  // =====================================
+  // MEDIA LIST
+  // GET /api/v1/admin/media
+  // =====================================
 
   @Get()
   @RequirePermissions('media.read')
@@ -199,7 +255,7 @@ export class MediaController {
 
     return {
       success: true,
-      message: 'Images récupérées avec succès.',
+      message: 'Media loaded successfully.',
       data: await this.service.findAll(
         input.page,
         input.limit,
@@ -207,41 +263,44 @@ export class MediaController {
     };
   }
 
-  // -------------------------------------
-  // GET /admin/media/:id
-  // -------------------------------------
+  // =====================================
+  // GET ONE MEDIA
+  // GET /api/v1/admin/media/:id
+  // =====================================
 
   @Get(':id')
   @RequirePermissions('media.read')
   async one(@Param('id') id: string) {
     return {
       success: true,
-      message: 'Image récupérée avec succès.',
+      message: 'Media loaded successfully.',
       data: await this.service.findOne(
         validateId(id),
       ),
     };
   }
 
-  // -------------------------------------
-  // GET /admin/media/:id/activity
-  // -------------------------------------
+  // =====================================
+  // MEDIA ACTIVITY
+  // GET /api/v1/admin/media/:id/activity
+  // =====================================
 
   @Get(':id/activity')
   @RequirePermissions('media.read')
   async activity(@Param('id') id: string) {
     return {
       success: true,
-      message: 'Historique récupéré avec succès.',
+      message: 'Media activity loaded successfully.',
       data: await this.service.activity(
         validateId(id),
       ),
     };
   }
 
-  // -------------------------------------
-  // PATCH /admin/media/:id
-  // -------------------------------------
+  // =====================================
+  // UPDATE MEDIA
+  // PATCH /api/v1/admin/media/:id
+  // =====================================
 
   @Patch(':id')
   @UseGuards(CsrfGuard)
@@ -264,7 +323,7 @@ export class MediaController {
 
     return {
       success: true,
-      message: 'Image modifiée avec succès.',
+      message: 'Media updated successfully.',
       data: await this.service.update(
         validateId(id),
         input,
@@ -273,10 +332,10 @@ export class MediaController {
     };
   }
 
-  // -------------------------------------
-  // DELETE /admin/media/:id
-  // -------------------------------------
-
+  // =====================================
+  // DELETE MEDIA
+  // DELETE /api/v1/admin/media/:id
+  // =====================================
 
   @Delete(':id')
   @HttpCode(HttpStatus.ACCEPTED)
@@ -300,10 +359,9 @@ export class MediaController {
     return {
       success: true,
       message: data.queued
-        ? 'Suppression programmée avec succès.'
-        : 'Image déjà supprimée ou suppression terminée.',
+        ? 'Media deletion has been queued.'
+        : 'Media has already been deleted.',
       data,
     };
   }
-
 }
